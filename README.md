@@ -23,32 +23,33 @@ An automated, production-ready Node.js application designed to run smoothly on a
 
 ## 🚀 Proxmox LXC Deployment
 
-### 1. Create a Debian or Ubuntu Container in Proxmox
-- In Proxmox VE, create a new LXC container using a standard **Debian 12** or **Ubuntu 22.04/24.04** template.
-- Recommended resources:
-  - **Cores**: 1
-  - **Memory**: 512 MB – 1 GB (app uses < 100 MB)
-  - **Disk**: 4 GB – 8 GB
-  - **Network**: Static or DHCP IP on your home LAN.
-
-### 2. Run the Automated Installer
-Log in to your LXC container console (as `root`) and run:
+### Option A: Automated 1-Click Proxmox VE Host Script (Recommended)
+You can create and fully configure the LXC container in seconds directly from your **Proxmox VE Node Shell** (or SSH into your PVE host):
 
 ```bash
-# Clone the repository
-git clone https://github.com/lsink/PlexPlaylistCurator.git /opt/plex-playlist-creator
+bash -c "$(curl -fsSL https://raw.githubusercontent.com/lsink/PlexPlaylistCurator/main/deploy/create-proxmox-ct.sh)"
+```
 
-# Run the installer
+This script will automatically:
+1. Detect storage and find the next available container ID.
+2. Download the official Debian 12 LXC template (if not already downloaded).
+3. Create an unprivileged, nested LXC container with DHCP networking.
+4. Boot the container, install Node.js 22 LTS, clone this repository, and set up the `systemd` service.
+5. Print your web access URL: `http://<CONTAINER-IP>:32500`.
+
+---
+
+### Option B: Install Inside an Existing Debian / Ubuntu Container
+If you prefer to manually create your own LXC container or VM:
+1. Create a Debian 12 or Ubuntu container in Proxmox (1 core, 512MB–1GB RAM, 4GB disk, unprivileged with nesting enabled).
+2. Inside your container shell, run:
+
+```bash
+git clone https://github.com/lsink/PlexPlaylistCurator.git /opt/plex-playlist-creator
 cd /opt/plex-playlist-creator
 chmod +x deploy/install-lxc.sh
 ./deploy/install-lxc.sh
 ```
-
-The script will automatically:
-1. Install Node.js LTS and build tools.
-2. Install npm dependencies and build production assets.
-3. Configure and start a `systemd` service (`plex-playlist-creator.service`).
-4. Display your web dashboard URL: `http://<CONTAINER-IP>:32500`.
 
 ---
 
