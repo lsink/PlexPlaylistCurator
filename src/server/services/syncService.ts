@@ -18,6 +18,7 @@ export interface PlaylistRecord {
   enabled: number;
   last_synced_at: string | null;
   last_sync_status: string | null;
+  consecutive_episodes?: number;
 }
 
 export interface PlaylistShowRecord {
@@ -87,6 +88,7 @@ export class SyncService {
     const queue = interleaveEpisodes(showConfigs, {
       mode: playlist.mode,
       bufferSize: playlist.buffer_size,
+      consecutiveEpisodes: playlist.consecutive_episodes || 1,
     });
 
     return {
@@ -149,6 +151,7 @@ export class SyncService {
       const queue = interleaveEpisodes(showConfigs, {
         mode: playlist.mode,
         bufferSize: playlist.buffer_size,
+        consecutiveEpisodes: playlist.consecutive_episodes || 1,
       });
 
       const episodeRatingKeys = queue.map((ep) => ep.ratingKey);

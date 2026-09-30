@@ -22,6 +22,7 @@ export interface Playlist {
   mode: InterleaveMode;
   buffer_size: number;
   unwatchedOnly: boolean;
+  consecutiveEpisodes?: number;
   enabled: boolean;
   last_synced_at: string | null;
   last_sync_status: string | null;

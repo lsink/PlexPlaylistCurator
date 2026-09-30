@@ -25,4 +25,11 @@ db.pragma('foreign_keys = ON');
 // Initialize schema
 db.exec(SCHEMA_SQL);
 
+// Safe column migrations for existing databases
+try {
+  db.exec('ALTER TABLE playlists ADD COLUMN consecutive_episodes INTEGER NOT NULL DEFAULT 1');
+} catch {
+  // Column already exists
+}
+
 export default db;

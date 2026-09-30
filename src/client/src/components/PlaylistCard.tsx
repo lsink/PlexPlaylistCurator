@@ -141,6 +141,11 @@ export const PlaylistCard: React.FC<PlaylistCardProps> = ({
           <span className="px-2 py-0.5 rounded text-xs bg-[#292f36] text-gray-300 border border-[#3b434d]">
             {playlist.buffer_size > 0 ? `Rolling ${playlist.buffer_size} eps` : 'Full Queue'}
           </span>
+          {playlist.consecutiveEpisodes && playlist.consecutiveEpisodes > 1 ? (
+            <span className="px-2 py-0.5 rounded text-xs bg-indigo-500/15 text-indigo-300 border border-indigo-500/30 font-medium">
+              {playlist.consecutiveEpisodes} in a row
+            </span>
+          ) : null}
           {playlist.unwatchedOnly && (
             <span className="px-2 py-0.5 rounded text-xs bg-[#292f36] text-amber-300/90 border border-[#3b434d]">
               Unwatched Only

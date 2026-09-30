@@ -307,4 +307,60 @@ describe('interleaveEngine', () => {
     const miniCount = result.filter((ep) => ep.showRatingKey === 'Mini').length;
     expect(miniCount).toBeGreaterThanOrEqual(2);
   });
+
+  it('supports consecutiveEpisodes in round-robin mode (e.g. 2 episodes in a row)', () => {
+    const showA: ShowConfig = {
+      ratingKey: 'A',
+      title: 'Show A',
+      episodes: makeMockEpisodes('A', 'Show A', 3),
+    };
+    const showB: ShowConfig = {
+      ratingKey: 'B',
+      title: 'Show B',
+      episodes: makeMockEpisodes('B', 'Show B', 3),
+    };
+
+    const result = interleaveEpisodes([showA, showB], {
+      mode: 'round_robin',
+      consecutiveEpisodes: 2,
+    });
+
+    expect(result.map((r) => `${r.showTitle} E${r.episodeNumber}`)).toEqual([
+      'Show A E1',
+      'Show A E2',
+      'Show B E1',
+      'Show B E2',
+      'Show A E3',
+      'Show B E3',
+    ]);
+  });
+
+  it('supports consecutiveEpisodes in runtime_balanced mode', () => {
+    const showA: ShowConfig = {
+      ratingKey: 'A',
+      title: 'Show A',
+      episodes: makeMockEpisodes('A', 'Show A', 4),
+    };
+    const showB: ShowConfig = {
+      ratingKey: 'B',
+      title: 'Show B',
+      episodes: makeMockEpisodes('B', 'Show B', 4),
+    };
+
+    const result = interleaveEpisodes([showA, showB], {
+      mode: 'runtime_balanced',
+      consecutiveEpisodes: 2,
+    });
+
+    expect(result.map((r) => `${r.showTitle} E${r.episodeNumber}`)).toEqual([
+      'Show A E1',
+      'Show A E2',
+      'Show B E1',
+      'Show B E2',
+      'Show A E3',
+      'Show A E4',
+      'Show B E3',
+      'Show B E4',
+    ]);
+  });
 });

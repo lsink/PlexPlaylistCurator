@@ -22,6 +22,7 @@ export type InterleaveMode = 'round_robin' | 'auto_proportional' | 'manual_weigh
 export interface InterleaveOptions {
   mode: InterleaveMode;
   bufferSize?: number; // max episodes to return, default infinite / all
+  consecutiveEpisodes?: number; // episodes in a row per show turn, default 1
 }
 
 /**
@@ -43,27 +44,32 @@ export function interleaveEpisodes(
   }
 
   const bufferSize = options.bufferSize && options.bufferSize > 0 ? options.bufferSize : Infinity;
+  const consecutiveEpisodes = Math.max(1, Math.round(options.consecutiveEpisodes || 1));
 
   switch (options.mode) {
     case 'round_robin':
-      return interleaveRoundRobin(activeShows, bufferSize);
+      return interleaveRoundRobin(activeShows, bufferSize, consecutiveEpisodes);
     case 'auto_proportional':
-      return interleaveAutoProportional(activeShows, bufferSize);
+      return interleaveAutoProportional(activeShows, bufferSize, consecutiveEpisodes);
     case 'manual_weighted':
-      return interleaveManualWeighted(activeShows, bufferSize);
+      return interleaveManualWeighted(activeShows, bufferSize, consecutiveEpisodes);
     case 'chronological':
       return interleaveChronological(activeShows, bufferSize);
     case 'runtime_balanced':
-      return interleaveRuntimeBalanced(activeShows, bufferSize);
+      return interleaveRuntimeBalanced(activeShows, bufferSize, consecutiveEpisodes);
     default:
-      return interleaveRoundRobin(activeShows, bufferSize);
+      return interleaveRoundRobin(activeShows, bufferSize, consecutiveEpisodes);
   }
 }
 
 /**
- * Strict 1:1:1 Round-Robin
+ * Strict 1:1:1 Round-Robin (or batch N:N:N if consecutiveEpisodes > 1)
  */
-function interleaveRoundRobin(shows: ShowConfig[], bufferSize: number): EpisodeItem[] {
+function interleaveRoundRobin(
+  shows: ShowConfig[],
+  bufferSize: number,
+  consecutiveEpisodes = 1
+): EpisodeItem[] {
   const queues = shows.map((s) => [...s.episodes]);
   const result: EpisodeItem[] = [];
 
@@ -71,12 +77,9 @@ function interleaveRoundRobin(shows: ShowConfig[], bufferSize: number): EpisodeI
   while (hasMore && result.length < bufferSize) {
     hasMore = false;
     for (let i = 0; i < queues.length; i++) {
-      if (queues[i].length > 0) {
+      for (let c = 0; c < consecutiveEpisodes && queues[i].length > 0 && result.length < bufferSize; c++) {
         result.push(queues[i].shift()!);
         hasMore = true;
-        if (result.length >= bufferSize) {
-          break;
-        }
       }
     }
   }
@@ -88,24 +91,32 @@ function interleaveRoundRobin(shows: ShowConfig[], bufferSize: number): EpisodeI
  * Auto-Proportional Pacing (Smooth Weighted Round-Robin):
  * Uses remaining episode count as weights so short shows don't burn out prematurely.
  */
-function interleaveAutoProportional(shows: ShowConfig[], bufferSize: number): EpisodeItem[] {
+function interleaveAutoProportional(
+  shows: ShowConfig[],
+  bufferSize: number,
+  consecutiveEpisodes = 1
+): EpisodeItem[] {
   // Weights are initial episode counts (or minimum 1)
   const initialWeights = shows.map((s) => Math.max(1, s.episodes.length));
-  return executeSWRR(shows, initialWeights, bufferSize);
+  return executeSWRR(shows, initialWeights, bufferSize, consecutiveEpisodes);
 }
 
 /**
  * Manual Weighted Interleaving (Smooth Weighted Round-Robin):
  * Uses user-defined manual weights (defaulting to 1 if not specified).
  */
-function interleaveManualWeighted(shows: ShowConfig[], bufferSize: number): EpisodeItem[] {
+function interleaveManualWeighted(
+  shows: ShowConfig[],
+  bufferSize: number,
+  consecutiveEpisodes = 1
+): EpisodeItem[] {
   const weights = shows.map((s) => {
     if (typeof s.manualWeight === 'number' && s.manualWeight > 0) {
       return Math.round(s.manualWeight);
     }
     return 1;
   });
-  return executeSWRR(shows, weights, bufferSize);
+  return executeSWRR(shows, weights, bufferSize, consecutiveEpisodes);
 }
 
 /**
@@ -115,7 +126,8 @@ function interleaveManualWeighted(shows: ShowConfig[], bufferSize: number): Epis
 function executeSWRR(
   shows: ShowConfig[],
   weights: number[],
-  bufferSize: number
+  bufferSize: number,
+  consecutiveEpisodes = 1
 ): EpisodeItem[] {
   const queues = shows.map((s) => [...s.episodes]);
   const currentCredits = new Array(shows.length).fill(0);
@@ -157,10 +169,12 @@ function executeSWRR(
     // 4. Decrement best index by totalActiveWeight
     currentCredits[bestIdx] -= totalActiveWeight;
 
-    // 5. Emit next episode
-    const ep = queues[bestIdx].shift();
-    if (ep) {
-      result.push(ep);
+    // 5. Emit up to consecutiveEpisodes from bestIdx
+    for (let c = 0; c < consecutiveEpisodes && queues[bestIdx].length > 0 && result.length < bufferSize; c++) {
+      const ep = queues[bestIdx].shift();
+      if (ep) {
+        result.push(ep);
+      }
     }
   }
 
@@ -210,7 +224,11 @@ function interleaveChronological(shows: ShowConfig[], bufferSize: number): Episo
  *   appears immediately in the playlist buffer while still granting higher frequency
  *   to longer shows and shorter episode durations.
  */
-function interleaveRuntimeBalanced(shows: ShowConfig[], bufferSize: number): EpisodeItem[] {
+function interleaveRuntimeBalanced(
+  shows: ShowConfig[],
+  bufferSize: number,
+  consecutiveEpisodes = 1
+): EpisodeItem[] {
   // Calculate average duration in minutes for each show
   const avgDurations = shows.map((s) => {
     const episodesWithDuration = s.episodes.filter(
@@ -242,5 +260,5 @@ function interleaveRuntimeBalanced(shows: ShowConfig[], bufferSize: number): Epi
   const commonGcd = rawWeights.reduce((acc, w) => gcd(acc, w), rawWeights[0] || 1);
   const weights = rawWeights.map((w) => Math.max(1, Math.round(w / commonGcd)));
 
-  return executeSWRR(shows, weights, bufferSize);
+  return executeSWRR(shows, weights, bufferSize, consecutiveEpisodes);
 }

@@ -18,6 +18,7 @@ router.get('/', requireAuth, (req, res) => {
     ...p,
     unwatchedOnly: Boolean(p.unwatched_only),
     enabled: Boolean(p.enabled),
+    consecutiveEpisodes: p.consecutive_episodes || 1,
     shows: getShowsStmt.all(p.id).map((s: any) => ({
       id: s.id,
       ratingKey: s.plex_show_rating_key,
@@ -55,6 +56,7 @@ router.get('/:id', requireAuth, (req, res) => {
     ...playlist,
     unwatchedOnly: Boolean(playlist.unwatched_only),
     enabled: Boolean(playlist.enabled),
+    consecutiveEpisodes: playlist.consecutive_episodes || 1,
     shows,
   });
 });
@@ -67,6 +69,7 @@ router.post('/', requireAuth, async (req, res) => {
     mode,
     bufferSize,
     unwatchedOnly,
+    consecutiveEpisodes,
     enabled,
     shows,
   } = req.body;
@@ -80,13 +83,14 @@ router.post('/', requireAuth, async (req, res) => {
   const selectedMode = mode || 'auto_proportional';
   const buffer = typeof bufferSize === 'number' ? bufferSize : 30;
   const isUnwatchedOnly = unwatchedOnly !== false ? 1 : 0;
+  const consecutive = typeof consecutiveEpisodes === 'number' && consecutiveEpisodes > 0 ? consecutiveEpisodes : 1;
   const isEnabled = enabled !== false ? 1 : 0;
 
   const insertPlaylist = db.transaction(() => {
     db.prepare(
-      `INSERT INTO playlists (id, name, plex_playlist_title, mode, buffer_size, unwatched_only, enabled)
-       VALUES (?, ?, ?, ?, ?, ?, ?)`
-    ).run(playlistId, name.trim(), title, selectedMode, buffer, isUnwatchedOnly, isEnabled);
+      `INSERT INTO playlists (id, name, plex_playlist_title, mode, buffer_size, unwatched_only, consecutive_episodes, enabled)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+    ).run(playlistId, name.trim(), title, selectedMode, buffer, isUnwatchedOnly, consecutive, isEnabled);
 
     if (Array.isArray(shows)) {
       const insertShowStmt = db.prepare(
@@ -125,6 +129,7 @@ router.put('/:id', requireAuth, async (req, res) => {
     mode,
     bufferSize,
     unwatchedOnly,
+    consecutiveEpisodes,
     enabled,
     shows,
   } = req.body;
@@ -142,6 +147,7 @@ router.put('/:id', requireAuth, async (req, res) => {
         mode = COALESCE(?, mode),
         buffer_size = COALESCE(?, buffer_size),
         unwatched_only = COALESCE(?, unwatched_only),
+        consecutive_episodes = COALESCE(?, consecutive_episodes),
         enabled = COALESCE(?, enabled),
         updated_at = CURRENT_TIMESTAMP
        WHERE id = ?`
@@ -151,6 +157,7 @@ router.put('/:id', requireAuth, async (req, res) => {
       mode,
       bufferSize,
       unwatchedOnly !== undefined ? (unwatchedOnly ? 1 : 0) : null,
+      consecutiveEpisodes !== undefined ? consecutiveEpisodes : null,
       enabled !== undefined ? (enabled ? 1 : 0) : null,
       playlistId
     );

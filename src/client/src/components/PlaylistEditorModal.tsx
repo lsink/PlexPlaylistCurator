@@ -43,6 +43,7 @@ export const PlaylistEditorModal: React.FC<PlaylistEditorModalProps> = ({
   const [mode, setMode] = useState<InterleaveMode>('auto_proportional');
   const [bufferSize, setBufferSize] = useState(30);
   const [unwatchedOnly, setUnwatchedOnly] = useState(true);
+  const [consecutiveEpisodes, setConsecutiveEpisodes] = useState(1);
   const [enabled, setEnabled] = useState(true);
   const [shows, setShows] = useState<ShowItem[]>([]);
   const [showPickerOpen, setShowPickerOpen] = useState(false);
@@ -59,6 +60,7 @@ export const PlaylistEditorModal: React.FC<PlaylistEditorModalProps> = ({
         setMode(playlist.mode);
         setBufferSize(playlist.buffer_size);
         setUnwatchedOnly(playlist.unwatchedOnly);
+        setConsecutiveEpisodes(playlist.consecutiveEpisodes || 1);
         setEnabled(playlist.enabled);
         setShows([...playlist.shows]);
       } else {
@@ -67,6 +69,7 @@ export const PlaylistEditorModal: React.FC<PlaylistEditorModalProps> = ({
         setMode('auto_proportional');
         setBufferSize(30);
         setUnwatchedOnly(true);
+        setConsecutiveEpisodes(1);
         setEnabled(true);
         setShows([]);
       }
@@ -148,6 +151,7 @@ export const PlaylistEditorModal: React.FC<PlaylistEditorModalProps> = ({
         mode,
         bufferSize: Number(bufferSize),
         unwatchedOnly,
+        consecutiveEpisodes: Number(consecutiveEpisodes) || 1,
         enabled,
         shows: shows.map((s, idx) => ({
           ratingKey: s.ratingKey,
@@ -326,29 +330,54 @@ export const PlaylistEditorModal: React.FC<PlaylistEditorModalProps> = ({
               </div>
             </div>
 
-            {/* Playlist Settings (Buffer & Unwatched) */}
+            {/* Playlist Settings (Buffer, Consecutive Episodes & Unwatched) */}
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 bg-[#16181b] p-4 rounded-xl border border-[#2d3238]">
-              <div>
-                <label className="block text-xs font-semibold uppercase tracking-wider text-gray-400 mb-1.5">
-                  Rolling Window Buffer Size
-                </label>
-                <div className="flex items-center space-x-2">
-                  <input
-                    type="number"
-                    min="5"
-                    max="500"
-                    step="5"
-                    value={bufferSize}
-                    onChange={(e) => setBufferSize(Number(e.target.value))}
-                    className="w-24 bg-[#22262b] border border-[#343b42] text-white rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-amber-500"
-                  />
-                  <span className="text-xs text-gray-400">
-                    episodes (0 = full queue without buffer limit)
-                  </span>
+              <div className="space-y-4">
+                <div>
+                  <label className="block text-xs font-semibold uppercase tracking-wider text-gray-400 mb-1.5">
+                    Rolling Window Buffer Size
+                  </label>
+                  <div className="flex items-center space-x-2">
+                    <input
+                      type="number"
+                      min="5"
+                      max="500"
+                      step="5"
+                      value={bufferSize}
+                      onChange={(e) => setBufferSize(Number(e.target.value))}
+                      className="w-24 bg-[#22262b] border border-[#343b42] text-white rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-amber-500"
+                    />
+                    <span className="text-xs text-gray-400">
+                      episodes (0 = full queue)
+                    </span>
+                  </div>
+                  <p className="text-[11px] text-gray-500 mt-1">
+                    Keeping 25-50 episodes keeps Plex playback swift while auto-refilling as you watch.
+                  </p>
                 </div>
-                <p className="text-[11px] text-gray-500 mt-1">
-                  Keeping 25-50 episodes keeps Plex playback swift while auto-refilling as you watch.
-                </p>
+
+                <div>
+                  <label className="block text-xs font-semibold uppercase tracking-wider text-gray-400 mb-1.5">
+                    Episodes in a Row per Show (Optional)
+                  </label>
+                  <div className="flex items-center space-x-2">
+                    <input
+                      type="number"
+                      min="1"
+                      max="10"
+                      step="1"
+                      value={consecutiveEpisodes}
+                      onChange={(e) => setConsecutiveEpisodes(Math.max(1, Number(e.target.value) || 1))}
+                      className="w-24 bg-[#22262b] border border-[#343b42] text-white rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-amber-500"
+                    />
+                    <span className="text-xs text-gray-400">
+                      in a row (Default: 1)
+                    </span>
+                  </div>
+                  <p className="text-[11px] text-gray-500 mt-1">
+                    Play 2+ episodes of the same show before rotating to reduce bouncing between different shows.
+                  </p>
+                </div>
               </div>
 
               <div className="space-y-3 pt-2">
