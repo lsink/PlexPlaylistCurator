@@ -192,7 +192,8 @@ describe('interleaveEngine', () => {
     expect(result.map((r) => r.title)).toEqual(['A1', 'B1', 'A2', 'B2']);
   });
 
-  it('handles runtime_balanced mode based on episode duration', () => {
+  it('handles runtime_balanced mode based on episode duration when counts are equal', () => {
+    // Both shows have 6 episodes.
     // Show A has 20-minute episodes (1,200,000 ms)
     // Show B has 60-minute episodes (3,600,000 ms)
     // Pacing ratio is 3:1 (3 episodes of Show A per 1 episode of Show B)
@@ -215,11 +216,16 @@ describe('interleaveEngine', () => {
       episodes: [
         { ratingKey: 'B1', showRatingKey: 'B', showTitle: 'Drama (60m)', seasonNumber: 1, episodeNumber: 1, title: 'D1', duration: 3600000 },
         { ratingKey: 'B2', showRatingKey: 'B', showTitle: 'Drama (60m)', seasonNumber: 1, episodeNumber: 2, title: 'D2', duration: 3600000 },
+        { ratingKey: 'B3', showRatingKey: 'B', showTitle: 'Drama (60m)', seasonNumber: 1, episodeNumber: 3, title: 'D3', duration: 3600000 },
+        { ratingKey: 'B4', showRatingKey: 'B', showTitle: 'Drama (60m)', seasonNumber: 1, episodeNumber: 4, title: 'D4', duration: 3600000 },
+        { ratingKey: 'B5', showRatingKey: 'B', showTitle: 'Drama (60m)', seasonNumber: 1, episodeNumber: 5, title: 'D5', duration: 3600000 },
+        { ratingKey: 'B6', showRatingKey: 'B', showTitle: 'Drama (60m)', seasonNumber: 1, episodeNumber: 6, title: 'D6', duration: 3600000 },
       ],
     };
 
     const result = interleaveEpisodes([showA, showB], {
       mode: 'runtime_balanced',
+      bufferSize: 8,
     });
 
     expect(result.length).toBe(8);
@@ -231,5 +237,45 @@ describe('interleaveEngine', () => {
     // Sequential order maintained
     expect(result.filter((r) => r.showRatingKey === 'A').map((r) => r.episodeNumber)).toEqual([1, 2, 3, 4, 5, 6]);
     expect(result.filter((r) => r.showRatingKey === 'B').map((r) => r.episodeNumber)).toEqual([1, 2]);
+  });
+
+  it('protects short-running shows from premature burnout by factoring in episode counts', () => {
+    // Show A is short (only 2 episodes, 20m each)
+    // Show B is longer (6 episodes, 60m each)
+    // Under pure duration, Show A would get weight 3 and burn out immediately in the first 2 slots.
+    // Under hybrid duration + count balancing:
+    // W_A = 2 * (60/20) = 6
+    // W_B = 6 * (60/60) = 6
+    // Effective weights are 1:1, spacing Show A smoothly across Show B!
+    const showA: ShowConfig = {
+      ratingKey: 'A',
+      title: 'Short Sitcom (20m)',
+      episodes: [
+        { ratingKey: 'A1', showRatingKey: 'A', showTitle: 'Short Sitcom', seasonNumber: 1, episodeNumber: 1, title: 'S1', duration: 1200000 },
+        { ratingKey: 'A2', showRatingKey: 'A', showTitle: 'Short Sitcom', seasonNumber: 1, episodeNumber: 2, title: 'S2', duration: 1200000 },
+      ],
+    };
+
+    const showB: ShowConfig = {
+      ratingKey: 'B',
+      title: 'Long Drama (60m)',
+      episodes: [
+        { ratingKey: 'B1', showRatingKey: 'B', showTitle: 'Long Drama', seasonNumber: 1, episodeNumber: 1, title: 'D1', duration: 3600000 },
+        { ratingKey: 'B2', showRatingKey: 'B', showTitle: 'Long Drama', seasonNumber: 1, episodeNumber: 2, title: 'D2', duration: 3600000 },
+        { ratingKey: 'B3', showRatingKey: 'B', showTitle: 'Long Drama', seasonNumber: 1, episodeNumber: 3, title: 'D3', duration: 3600000 },
+        { ratingKey: 'B4', showRatingKey: 'B', showTitle: 'Long Drama', seasonNumber: 1, episodeNumber: 4, title: 'D4', duration: 3600000 },
+        { ratingKey: 'B5', showRatingKey: 'B', showTitle: 'Long Drama', seasonNumber: 1, episodeNumber: 5, title: 'D5', duration: 3600000 },
+        { ratingKey: 'B6', showRatingKey: 'B', showTitle: 'Long Drama', seasonNumber: 1, episodeNumber: 6, title: 'D6', duration: 3600000 },
+      ],
+    };
+
+    const result = interleaveEpisodes([showA, showB], {
+      mode: 'runtime_balanced',
+    });
+
+    expect(result.length).toBe(8);
+    // Smooth 1:1 interleaved distribution until Show A exhausts, followed by remaining Show B episodes
+    const titles = result.map((r) => r.title);
+    expect(titles).toEqual(['S1', 'D1', 'S2', 'D2', 'D3', 'D4', 'D5', 'D6']);
   });
 });

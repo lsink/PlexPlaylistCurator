@@ -197,9 +197,10 @@ function interleaveChronological(shows: ShowConfig[], bufferSize: number): Episo
 
 /**
  * Runtime / Duration-Balanced Interleaving (Smooth Weighted Round-Robin):
- * Balances watch time across shows based on average episode length.
- * Shorter episodes (e.g. 22-min sitcoms) receive higher frequency weights than longer episodes (e.g. 50-min dramas),
- * resulting in equal viewing time per series.
+ * Balances watch time across shows taking into account both average episode length
+ * AND remaining episode count.
+ * Shorter episodes receive higher frequency weights, scaled proportionally by
+ * remaining episodes so shorter series are smoothly paced and do not run out prematurely.
  */
 function interleaveRuntimeBalanced(shows: ShowConfig[], bufferSize: number): EpisodeItem[] {
   // Calculate average duration in minutes for each show
@@ -217,9 +218,21 @@ function interleaveRuntimeBalanced(shows: ShowConfig[], bufferSize: number): Epi
 
   const maxAvgDuration = Math.max(...avgDurations);
 
-  // Weights are inversely proportional to duration:
-  // e.g. If max show is 50m and current show is 25m, weight is round(50/25) = 2
-  const weights = avgDurations.map((dur) => Math.max(1, Math.round(maxAvgDuration / dur)));
+  // Weights combine remaining episode count and inverse duration:
+  // Weight = count * (maxAvgDuration / duration)
+  // - If episode counts are equal, shorter shows appear more often (runtime balancing)
+  // - If durations are equal, shows with more episodes appear more often (proportional)
+  // - Shows with fewer episodes are protected from exhausting prematurely
+  const rawWeights = shows.map((s, idx) => {
+    const count = Math.max(1, s.episodes.length);
+    const dur = avgDurations[idx];
+    return Math.max(1, Math.round(count * (maxAvgDuration / dur)));
+  });
+
+  // Reduce by GCD to keep weights minimal
+  const gcd = (a: number, b: number): number => (b === 0 ? a : gcd(b, a % b));
+  const commonGcd = rawWeights.reduce((acc, w) => gcd(acc, w), rawWeights[0] || 1);
+  const weights = rawWeights.map((w) => Math.max(1, Math.round(w / commonGcd)));
 
   return executeSWRR(shows, weights, bufferSize);
 }

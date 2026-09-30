@@ -130,7 +130,7 @@ To make playlists advance instantly when you finish an episode:
 
 | Mode | Behavior | Ideal Use Case |
 | :--- | :--- | :--- |
-| **Runtime-Balanced (Watch Time)** | Automatically calculates average episode runtime from Plex metadata and balances viewing time (e.g. ~2 episodes of a 22-min sitcom per 1 episode of a 50-min drama). | Equalizing viewing time when mixing short comedies with long dramas. |
+| **Runtime-Balanced (Smart Watch Time)** | Automatically calculates average episode runtime from Plex metadata and balances viewing time while factoring in remaining episode counts. Shorter series are smoothly paced across the rotation so they don't run out prematurely. | Equalizing viewing time when mixing short comedies with long dramas while preventing shorter shows from exhausting too quickly. |
 | **Auto-Proportional Pacing** | Dynamically calculates weights from remaining unwatched episodes ($W_i = \text{unwatched}_i$) using Smooth Weighted Round-Robin (fair queuing). | Mixing a 10-episode miniseries with a 150-episode sitcom without burning through the short show in the first few days. |
 | **Pure Round-Robin (1:1:1)** | Strictly cycles through one episode per show in sequence: Show A $\rightarrow$ Show B $\rightarrow$ Show C $\rightarrow$ Show A... | Shows with similar episode counts where you want equal rotation. |
 | **Manual Weighted Override** | Multiplies show frequency based on custom integer weights you set (e.g. Show A = 2, Show B = 1) with smooth spacing. | Custom TV channel block vibes (e.g. 2 cartoons for every 1 drama). |

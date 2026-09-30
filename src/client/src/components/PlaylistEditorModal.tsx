@@ -317,10 +317,10 @@ export const PlaylistEditorModal: React.FC<PlaylistEditorModalProps> = ({
                 >
                   <div className="flex items-center space-x-2 font-semibold text-sm text-white mb-1">
                     <Clock className="w-4 h-4 text-cyan-400" />
-                    <span>Runtime-Balanced (Watch Time)</span>
+                    <span>Runtime-Balanced (Smart Watch Time)</span>
                   </div>
                   <p className="text-xs text-gray-400">
-                    Balances watch time using episode duration metadata from Plex. Automatically plays ~2 episodes of a 22-min sitcom for every 1 episode of a 50-min drama so you spend equal time on each series.
+                    Balances watch time using episode duration metadata from Plex while factoring in remaining episode counts. Shorter series are smoothly paced across the rotation so they don't run out prematurely.
                   </p>
                 </div>
               </div>
