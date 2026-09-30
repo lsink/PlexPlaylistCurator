@@ -261,11 +261,12 @@ function interleaveChronological(shows: ShowConfig[], bufferSize: number): Episo
 
 /**
  * Runtime / Duration-Balanced Interleaving (Smooth Weighted Round-Robin):
- * Balances watch time across shows taking into account both average episode length
- * AND remaining episode count with sublinear square root dampening.
+ * Balances watch time across shows taking into account average episode length,
+ * remaining episode count with sublinear square root dampening, AND user-defined
+ * manual weight multipliers.
  *
  * Math model:
- * Weight_i = round(10 * sqrt(count_i / max_count) * (max_duration / duration_i))
+ * Weight_i = round(10 * sqrt(count_i / max_count) * (max_duration / duration_i) * manual_weight_i)
  *
  * Why square root dampening?
  * Prevents "starvation" of shorter series (e.g. 10 episodes alongside 200 episodes):
@@ -297,13 +298,14 @@ function interleaveRuntimeBalanced(
   const episodeCounts = shows.map((s) => Math.max(1, s.episodes.length));
   const maxEpisodeCount = Math.max(...episodeCounts);
 
-  // Sublinear square-root count weighting combined with duration factor:
-  const rawWeights = shows.map((_, idx) => {
+  // Sublinear square-root count weighting combined with duration factor and user manualWeight multiplier:
+  const rawWeights = shows.map((s, idx) => {
     const count = episodeCounts[idx];
     const dur = avgDurations[idx];
+    const userWeight = typeof s.manualWeight === 'number' && s.manualWeight > 0 ? s.manualWeight : 1;
     const countFactor = Math.sqrt(count / maxEpisodeCount);
     const durationFactor = maxAvgDuration / dur;
-    return Math.max(1, Math.round(10 * countFactor * durationFactor));
+    return Math.max(1, Math.round(10 * countFactor * durationFactor * userWeight));
   });
 
   const batchSizes = computeBatchSizes(rawWeights, minConsecutive, maxConsecutive);

@@ -407,4 +407,44 @@ describe('interleaveEngine', () => {
       'D2',
     ]);
   });
+
+  it('incorporates manualWeight multiplier in runtime_balanced mode', () => {
+    // Both shows have equal episodes (6) and equal episode length (60m)
+    // Show A has manualWeight 1
+    // Show B has manualWeight 2
+    // With 1x vs 2x multiplier, Show B should be scheduled twice as frequently as Show A
+    const showA: ShowConfig = {
+      ratingKey: 'A',
+      title: 'Show A (1x)',
+      manualWeight: 1,
+      episodes: makeMockEpisodes('A', 'Show A', 6),
+    };
+    // add durations
+    showA.episodes.forEach((e) => (e.duration = 3600000));
+
+    const showB: ShowConfig = {
+      ratingKey: 'B',
+      title: 'Show B (2x)',
+      manualWeight: 2,
+      episodes: makeMockEpisodes('B', 'Show B', 6),
+    };
+    showB.episodes.forEach((e) => (e.duration = 3600000));
+
+    const result = interleaveEpisodes([showA, showB], {
+      mode: 'runtime_balanced',
+      bufferSize: 6,
+    });
+
+    expect(result.length).toBe(6);
+    // SWRR with weights 1:2 -> B, A, B, B, A, B
+    expect(result.map((r) => r.showTitle)).toEqual([
+      'Show B',
+      'Show A',
+      'Show B',
+      'Show B',
+      'Show A',
+      'Show B',
+    ]);
+  });
 });
+

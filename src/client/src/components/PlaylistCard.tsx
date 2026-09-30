@@ -192,7 +192,7 @@ export const PlaylistCard: React.FC<PlaylistCardProps> = ({
                     )}
                     <div className="min-w-0 flex-1">
                       <p className="text-xs font-medium text-gray-200 truncate">{show.title}</p>
-                      {playlist.mode === 'manual_weighted' && (
+                      {(playlist.mode === 'manual_weighted' || (playlist.mode === 'runtime_balanced' && (show.manualWeight || 1) > 1)) && (
                         <p className="text-[10px] text-amber-400 font-mono">
                           Weight: {show.manualWeight || 1}x
                         </p>
