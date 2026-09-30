@@ -36,7 +36,7 @@ Log in to your LXC container console (as `root`) and run:
 
 ```bash
 # Clone the repository
-git clone https://github.com/yourusername/PlexPlaylistCreator.git /opt/plex-playlist-creator
+git clone https://github.com/lsink/PlexPlaylistCurator.git /opt/plex-playlist-creator
 
 # Run the installer
 cd /opt/plex-playlist-creator
