@@ -83,7 +83,9 @@ systemctl enable --now plex-playlist-creator
 
 # Configure global update command
 chmod +x "${APP_DIR}/deploy/update-lxc.sh"
-ln -sf "${APP_DIR}/deploy/update-lxc.sh" /usr/local/bin/plex-update
+ln -sf "${APP_DIR}/deploy/update-lxc.sh" /usr/bin/plex-update
+ln -sf "${APP_DIR}/deploy/update-lxc.sh" /usr/bin/update 2>/dev/null || true
+ln -sf "${APP_DIR}/deploy/update-lxc.sh" /usr/local/bin/plex-update 2>/dev/null || true
 ln -sf "${APP_DIR}/deploy/update-lxc.sh" /usr/local/bin/update 2>/dev/null || true
 
 # Fetch local IP address
