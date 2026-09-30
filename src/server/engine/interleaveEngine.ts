@@ -198,9 +198,17 @@ function interleaveChronological(shows: ShowConfig[], bufferSize: number): Episo
 /**
  * Runtime / Duration-Balanced Interleaving (Smooth Weighted Round-Robin):
  * Balances watch time across shows taking into account both average episode length
- * AND remaining episode count.
- * Shorter episodes receive higher frequency weights, scaled proportionally by
- * remaining episodes so shorter series are smoothly paced and do not run out prematurely.
+ * AND remaining episode count with sublinear square root dampening.
+ *
+ * Math model:
+ * Weight_i = round(10 * sqrt(count_i / max_count) * (max_duration / duration_i))
+ *
+ * Why square root dampening?
+ * Prevents "starvation" of shorter series (e.g. 10 episodes alongside 200 episodes):
+ * - Linear scaling would force the 10-episode show to wait 80+ episodes to appear.
+ * - Square root dampening reduces the 20:1 gap to ~4.5:1, ensuring the smaller show
+ *   appears immediately in the playlist buffer while still granting higher frequency
+ *   to longer shows and shorter episode durations.
  */
 function interleaveRuntimeBalanced(shows: ShowConfig[], bufferSize: number): EpisodeItem[] {
   // Calculate average duration in minutes for each show
@@ -217,16 +225,16 @@ function interleaveRuntimeBalanced(shows: ShowConfig[], bufferSize: number): Epi
   });
 
   const maxAvgDuration = Math.max(...avgDurations);
+  const episodeCounts = shows.map((s) => Math.max(1, s.episodes.length));
+  const maxEpisodeCount = Math.max(...episodeCounts);
 
-  // Weights combine remaining episode count and inverse duration:
-  // Weight = count * (maxAvgDuration / duration)
-  // - If episode counts are equal, shorter shows appear more often (runtime balancing)
-  // - If durations are equal, shows with more episodes appear more often (proportional)
-  // - Shows with fewer episodes are protected from exhausting prematurely
-  const rawWeights = shows.map((s, idx) => {
-    const count = Math.max(1, s.episodes.length);
+  // Sublinear square-root count weighting combined with duration factor:
+  const rawWeights = shows.map((_, idx) => {
+    const count = episodeCounts[idx];
     const dur = avgDurations[idx];
-    return Math.max(1, Math.round(count * (maxAvgDuration / dur)));
+    const countFactor = Math.sqrt(count / maxEpisodeCount);
+    const durationFactor = maxAvgDuration / dur;
+    return Math.max(1, Math.round(10 * countFactor * durationFactor));
   });
 
   // Reduce by GCD to keep weights minimal

@@ -278,4 +278,33 @@ describe('interleaveEngine', () => {
     const titles = result.map((r) => r.title);
     expect(titles).toEqual(['S1', 'D1', 'S2', 'D2', 'D3', 'D4', 'D5', 'D6']);
   });
+
+  it('prevents starvation when mixing a 10-episode miniseries with four 200-episode shows', () => {
+    // 4 shows with 200 episodes (60m each)
+    // 1 show with 10 episodes (60m each)
+    const shows: ShowConfig[] = [
+      { ratingKey: 'S1', title: 'Show 1', episodes: makeMockEpisodes('S1', 'Show 1', 200) },
+      { ratingKey: 'S2', title: 'Show 2', episodes: makeMockEpisodes('S2', 'Show 2', 200) },
+      { ratingKey: 'S3', title: 'Show 3', episodes: makeMockEpisodes('S3', 'Show 3', 200) },
+      { ratingKey: 'S4', title: 'Show 4', episodes: makeMockEpisodes('S4', 'Show 4', 200) },
+      { ratingKey: 'Mini', title: 'Miniseries', episodes: makeMockEpisodes('Mini', 'Miniseries', 10) },
+    ];
+
+    // Request a 50-episode rolling window buffer
+    const result = interleaveEpisodes(shows, {
+      mode: 'runtime_balanced',
+      bufferSize: 50,
+    });
+
+    expect(result.length).toBe(50);
+    // Under linear weighting, the miniseries would have weight 1 vs 20 for the others (80 episodes of others before Mini).
+    // Under square-root dampening, the miniseries appears early (within the first ~25 episodes)!
+    const firstMiniIndex = result.findIndex((ep) => ep.showRatingKey === 'Mini');
+    expect(firstMiniIndex).toBeGreaterThan(-1);
+    expect(firstMiniIndex).toBeLessThan(25);
+
+    // Verify it appears multiple times in the first 50 items
+    const miniCount = result.filter((ep) => ep.showRatingKey === 'Mini').length;
+    expect(miniCount).toBeGreaterThanOrEqual(2);
+  });
 });
