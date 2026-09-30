@@ -22,7 +22,39 @@ export type InterleaveMode = 'round_robin' | 'auto_proportional' | 'manual_weigh
 export interface InterleaveOptions {
   mode: InterleaveMode;
   bufferSize?: number; // max episodes to return, default infinite / all
-  consecutiveEpisodes?: number; // episodes in a row per show turn, default 1
+  minConsecutive?: number; // min episodes in a row per show turn, default 1
+  maxConsecutive?: number; // max episodes in a row per show turn, default 1
+  consecutiveEpisodes?: number; // legacy alias if min/max not provided
+}
+
+/**
+ * Computes per-show batch sizes within [minConsecutive, maxConsecutive]
+ * scaled proportionally to each show's relative weight / demand.
+ */
+function computeBatchSizes(
+  metrics: number[],
+  minConsecutive: number,
+  maxConsecutive: number
+): number[] {
+  if (minConsecutive >= maxConsecutive) {
+    return metrics.map(() => minConsecutive);
+  }
+
+  const minMetric = Math.min(...metrics);
+  const maxMetric = Math.max(...metrics);
+  const spread = maxMetric - minMetric;
+
+  if (spread === 0) {
+    return metrics.map(() => minConsecutive);
+  }
+
+  return metrics.map((val) => {
+    const fraction = (val - minMetric) / spread;
+    return Math.max(
+      minConsecutive,
+      Math.min(maxConsecutive, Math.round(minConsecutive + fraction * (maxConsecutive - minConsecutive)))
+    );
+  });
 }
 
 /**
@@ -44,26 +76,33 @@ export function interleaveEpisodes(
   }
 
   const bufferSize = options.bufferSize && options.bufferSize > 0 ? options.bufferSize : Infinity;
-  const consecutiveEpisodes = Math.max(1, Math.round(options.consecutiveEpisodes || 1));
+  const minConsecutive = Math.max(
+    1,
+    Math.round(options.minConsecutive || options.consecutiveEpisodes || 1)
+  );
+  const maxConsecutive = Math.max(
+    minConsecutive,
+    Math.round(options.maxConsecutive || minConsecutive)
+  );
 
   switch (options.mode) {
     case 'round_robin':
-      return interleaveRoundRobin(activeShows, bufferSize, consecutiveEpisodes);
+      return interleaveRoundRobin(activeShows, bufferSize, minConsecutive);
     case 'auto_proportional':
-      return interleaveAutoProportional(activeShows, bufferSize, consecutiveEpisodes);
+      return interleaveAutoProportional(activeShows, bufferSize, minConsecutive, maxConsecutive);
     case 'manual_weighted':
-      return interleaveManualWeighted(activeShows, bufferSize, consecutiveEpisodes);
+      return interleaveManualWeighted(activeShows, bufferSize, minConsecutive, maxConsecutive);
     case 'chronological':
       return interleaveChronological(activeShows, bufferSize);
     case 'runtime_balanced':
-      return interleaveRuntimeBalanced(activeShows, bufferSize, consecutiveEpisodes);
+      return interleaveRuntimeBalanced(activeShows, bufferSize, minConsecutive, maxConsecutive);
     default:
-      return interleaveRoundRobin(activeShows, bufferSize, consecutiveEpisodes);
+      return interleaveRoundRobin(activeShows, bufferSize, minConsecutive);
   }
 }
 
 /**
- * Strict 1:1:1 Round-Robin (or batch N:N:N if consecutiveEpisodes > 1)
+ * Strict 1:1:1 Round-Robin (or batch N:N:N if minConsecutive > 1)
  */
 function interleaveRoundRobin(
   shows: ShowConfig[],
@@ -94,11 +133,16 @@ function interleaveRoundRobin(
 function interleaveAutoProportional(
   shows: ShowConfig[],
   bufferSize: number,
-  consecutiveEpisodes = 1
+  minConsecutive = 1,
+  maxConsecutive = 1
 ): EpisodeItem[] {
   // Weights are initial episode counts (or minimum 1)
   const initialWeights = shows.map((s) => Math.max(1, s.episodes.length));
-  return executeSWRR(shows, initialWeights, bufferSize, consecutiveEpisodes);
+  const batchSizes = computeBatchSizes(initialWeights, minConsecutive, maxConsecutive);
+  const adjustedWeights = initialWeights.map((w, idx) =>
+    Math.max(1, Math.round(w / (batchSizes[idx] || 1)))
+  );
+  return executeSWRR(shows, adjustedWeights, bufferSize, batchSizes);
 }
 
 /**
@@ -108,7 +152,8 @@ function interleaveAutoProportional(
 function interleaveManualWeighted(
   shows: ShowConfig[],
   bufferSize: number,
-  consecutiveEpisodes = 1
+  minConsecutive = 1,
+  maxConsecutive = 1
 ): EpisodeItem[] {
   const weights = shows.map((s) => {
     if (typeof s.manualWeight === 'number' && s.manualWeight > 0) {
@@ -116,7 +161,11 @@ function interleaveManualWeighted(
     }
     return 1;
   });
-  return executeSWRR(shows, weights, bufferSize, consecutiveEpisodes);
+  const batchSizes = computeBatchSizes(weights, minConsecutive, maxConsecutive);
+  const adjustedWeights = weights.map((w, idx) =>
+    Math.max(1, Math.round(w / (batchSizes[idx] || 1)))
+  );
+  return executeSWRR(shows, adjustedWeights, bufferSize, batchSizes);
 }
 
 /**
@@ -127,7 +176,7 @@ function executeSWRR(
   shows: ShowConfig[],
   weights: number[],
   bufferSize: number,
-  consecutiveEpisodes = 1
+  batchSizes: number[]
 ): EpisodeItem[] {
   const queues = shows.map((s) => [...s.episodes]);
   const currentCredits = new Array(shows.length).fill(0);
@@ -169,8 +218,9 @@ function executeSWRR(
     // 4. Decrement best index by totalActiveWeight
     currentCredits[bestIdx] -= totalActiveWeight;
 
-    // 5. Emit up to consecutiveEpisodes from bestIdx
-    for (let c = 0; c < consecutiveEpisodes && queues[bestIdx].length > 0 && result.length < bufferSize; c++) {
+    // 5. Emit up to batchSizes[bestIdx] from bestIdx
+    const countToEmit = batchSizes[bestIdx] || 1;
+    for (let c = 0; c < countToEmit && queues[bestIdx].length > 0 && result.length < bufferSize; c++) {
       const ep = queues[bestIdx].shift();
       if (ep) {
         result.push(ep);
@@ -227,7 +277,8 @@ function interleaveChronological(shows: ShowConfig[], bufferSize: number): Episo
 function interleaveRuntimeBalanced(
   shows: ShowConfig[],
   bufferSize: number,
-  consecutiveEpisodes = 1
+  minConsecutive = 1,
+  maxConsecutive = 1
 ): EpisodeItem[] {
   // Calculate average duration in minutes for each show
   const avgDurations = shows.map((s) => {
@@ -255,10 +306,17 @@ function interleaveRuntimeBalanced(
     return Math.max(1, Math.round(10 * countFactor * durationFactor));
   });
 
+  const batchSizes = computeBatchSizes(rawWeights, minConsecutive, maxConsecutive);
+
+  // Adjust turn weights by batch size so that the batch size doesn't double-compound with turn frequency
+  const adjustedWeights = rawWeights.map((w, idx) =>
+    Math.max(1, Math.round(w / (batchSizes[idx] || 1)))
+  );
+
   // Reduce by GCD to keep weights minimal
   const gcd = (a: number, b: number): number => (b === 0 ? a : gcd(b, a % b));
-  const commonGcd = rawWeights.reduce((acc, w) => gcd(acc, w), rawWeights[0] || 1);
-  const weights = rawWeights.map((w) => Math.max(1, Math.round(w / commonGcd)));
+  const commonGcd = adjustedWeights.reduce((acc, w) => gcd(acc, w), adjustedWeights[0] || 1);
+  const weights = adjustedWeights.map((w) => Math.max(1, Math.round(w / commonGcd)));
 
-  return executeSWRR(shows, weights, bufferSize, consecutiveEpisodes);
+  return executeSWRR(shows, weights, bufferSize, batchSizes);
 }

@@ -18,7 +18,9 @@ router.get('/', requireAuth, (req, res) => {
     ...p,
     unwatchedOnly: Boolean(p.unwatched_only),
     enabled: Boolean(p.enabled),
-    consecutiveEpisodes: p.consecutive_episodes || 1,
+    consecutiveEpisodes: p.min_consecutive_episodes || p.consecutive_episodes || 1,
+    minConsecutiveEpisodes: p.min_consecutive_episodes || p.consecutive_episodes || 1,
+    maxConsecutiveEpisodes: p.max_consecutive_episodes || p.min_consecutive_episodes || p.consecutive_episodes || 1,
     shows: getShowsStmt.all(p.id).map((s: any) => ({
       id: s.id,
       ratingKey: s.plex_show_rating_key,
@@ -56,7 +58,9 @@ router.get('/:id', requireAuth, (req, res) => {
     ...playlist,
     unwatchedOnly: Boolean(playlist.unwatched_only),
     enabled: Boolean(playlist.enabled),
-    consecutiveEpisodes: playlist.consecutive_episodes || 1,
+    consecutiveEpisodes: playlist.min_consecutive_episodes || playlist.consecutive_episodes || 1,
+    minConsecutiveEpisodes: playlist.min_consecutive_episodes || playlist.consecutive_episodes || 1,
+    maxConsecutiveEpisodes: playlist.max_consecutive_episodes || playlist.min_consecutive_episodes || playlist.consecutive_episodes || 1,
     shows,
   });
 });
@@ -70,6 +74,8 @@ router.post('/', requireAuth, async (req, res) => {
     bufferSize,
     unwatchedOnly,
     consecutiveEpisodes,
+    minConsecutiveEpisodes,
+    maxConsecutiveEpisodes,
     enabled,
     shows,
   } = req.body;
@@ -83,14 +89,19 @@ router.post('/', requireAuth, async (req, res) => {
   const selectedMode = mode || 'auto_proportional';
   const buffer = typeof bufferSize === 'number' ? bufferSize : 30;
   const isUnwatchedOnly = unwatchedOnly !== false ? 1 : 0;
-  const consecutive = typeof consecutiveEpisodes === 'number' && consecutiveEpisodes > 0 ? consecutiveEpisodes : 1;
+  const minConsecutive = typeof minConsecutiveEpisodes === 'number' && minConsecutiveEpisodes > 0
+    ? minConsecutiveEpisodes
+    : (typeof consecutiveEpisodes === 'number' && consecutiveEpisodes > 0 ? consecutiveEpisodes : 1);
+  const maxConsecutive = typeof maxConsecutiveEpisodes === 'number' && maxConsecutiveEpisodes > 0
+    ? Math.max(minConsecutive, maxConsecutiveEpisodes)
+    : minConsecutive;
   const isEnabled = enabled !== false ? 1 : 0;
 
   const insertPlaylist = db.transaction(() => {
     db.prepare(
-      `INSERT INTO playlists (id, name, plex_playlist_title, mode, buffer_size, unwatched_only, consecutive_episodes, enabled)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
-    ).run(playlistId, name.trim(), title, selectedMode, buffer, isUnwatchedOnly, consecutive, isEnabled);
+      `INSERT INTO playlists (id, name, plex_playlist_title, mode, buffer_size, unwatched_only, consecutive_episodes, min_consecutive_episodes, max_consecutive_episodes, enabled)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    ).run(playlistId, name.trim(), title, selectedMode, buffer, isUnwatchedOnly, minConsecutive, minConsecutive, maxConsecutive, isEnabled);
 
     if (Array.isArray(shows)) {
       const insertShowStmt = db.prepare(
@@ -130,6 +141,8 @@ router.put('/:id', requireAuth, async (req, res) => {
     bufferSize,
     unwatchedOnly,
     consecutiveEpisodes,
+    minConsecutiveEpisodes,
+    maxConsecutiveEpisodes,
     enabled,
     shows,
   } = req.body;
@@ -138,6 +151,13 @@ router.put('/:id', requireAuth, async (req, res) => {
   if (!existing) {
     return res.status(404).json({ error: 'Playlist not found' });
   }
+
+  const minConsecutive = typeof minConsecutiveEpisodes === 'number' && minConsecutiveEpisodes > 0
+    ? minConsecutiveEpisodes
+    : (typeof consecutiveEpisodes === 'number' && consecutiveEpisodes > 0 ? consecutiveEpisodes : undefined);
+  const maxConsecutive = typeof maxConsecutiveEpisodes === 'number' && maxConsecutiveEpisodes > 0
+    ? maxConsecutiveEpisodes
+    : (minConsecutive !== undefined ? minConsecutive : undefined);
 
   const updateTx = db.transaction(() => {
     db.prepare(
@@ -148,6 +168,8 @@ router.put('/:id', requireAuth, async (req, res) => {
         buffer_size = COALESCE(?, buffer_size),
         unwatched_only = COALESCE(?, unwatched_only),
         consecutive_episodes = COALESCE(?, consecutive_episodes),
+        min_consecutive_episodes = COALESCE(?, min_consecutive_episodes),
+        max_consecutive_episodes = COALESCE(?, max_consecutive_episodes),
         enabled = COALESCE(?, enabled),
         updated_at = CURRENT_TIMESTAMP
        WHERE id = ?`
@@ -157,7 +179,9 @@ router.put('/:id', requireAuth, async (req, res) => {
       mode,
       bufferSize,
       unwatchedOnly !== undefined ? (unwatchedOnly ? 1 : 0) : null,
-      consecutiveEpisodes !== undefined ? consecutiveEpisodes : null,
+      minConsecutive,
+      minConsecutive,
+      maxConsecutive,
       enabled !== undefined ? (enabled ? 1 : 0) : null,
       playlistId
     );

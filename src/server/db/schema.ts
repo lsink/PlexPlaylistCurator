@@ -20,6 +20,8 @@ CREATE TABLE IF NOT EXISTS playlists (
   buffer_size INTEGER NOT NULL DEFAULT 30,
   unwatched_only INTEGER NOT NULL DEFAULT 1,
   consecutive_episodes INTEGER NOT NULL DEFAULT 1,
+  min_consecutive_episodes INTEGER NOT NULL DEFAULT 1,
+  max_consecutive_episodes INTEGER NOT NULL DEFAULT 1,
   enabled INTEGER NOT NULL DEFAULT 1,
   last_synced_at TEXT,
   last_sync_status TEXT,

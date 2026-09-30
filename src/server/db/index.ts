@@ -28,8 +28,12 @@ db.exec(SCHEMA_SQL);
 // Safe column migrations for existing databases
 try {
   db.exec('ALTER TABLE playlists ADD COLUMN consecutive_episodes INTEGER NOT NULL DEFAULT 1');
-} catch {
-  // Column already exists
-}
+} catch {}
+try {
+  db.exec('ALTER TABLE playlists ADD COLUMN min_consecutive_episodes INTEGER NOT NULL DEFAULT 1');
+} catch {}
+try {
+  db.exec('ALTER TABLE playlists ADD COLUMN max_consecutive_episodes INTEGER NOT NULL DEFAULT 1');
+} catch {}
 
 export default db;

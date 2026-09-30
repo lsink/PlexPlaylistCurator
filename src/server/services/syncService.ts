@@ -19,6 +19,8 @@ export interface PlaylistRecord {
   last_synced_at: string | null;
   last_sync_status: string | null;
   consecutive_episodes?: number;
+  min_consecutive_episodes?: number;
+  max_consecutive_episodes?: number;
 }
 
 export interface PlaylistShowRecord {
@@ -85,10 +87,14 @@ export class SyncService {
       });
     }
 
+    const minConsecutive = playlist.min_consecutive_episodes || playlist.consecutive_episodes || 1;
+    const maxConsecutive = playlist.max_consecutive_episodes || minConsecutive;
+
     const queue = interleaveEpisodes(showConfigs, {
       mode: playlist.mode,
       bufferSize: playlist.buffer_size,
-      consecutiveEpisodes: playlist.consecutive_episodes || 1,
+      minConsecutive,
+      maxConsecutive,
     });
 
     return {
@@ -148,10 +154,14 @@ export class SyncService {
         });
       }
 
+      const syncMinConsecutive = playlist.min_consecutive_episodes || playlist.consecutive_episodes || 1;
+      const syncMaxConsecutive = playlist.max_consecutive_episodes || syncMinConsecutive;
+
       const queue = interleaveEpisodes(showConfigs, {
         mode: playlist.mode,
         bufferSize: playlist.buffer_size,
-        consecutiveEpisodes: playlist.consecutive_episodes || 1,
+        minConsecutive: syncMinConsecutive,
+        maxConsecutive: syncMaxConsecutive,
       });
 
       const episodeRatingKeys = queue.map((ep) => ep.ratingKey);

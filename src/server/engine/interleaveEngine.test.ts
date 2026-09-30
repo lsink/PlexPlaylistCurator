@@ -363,4 +363,48 @@ describe('interleaveEngine', () => {
       'Show B E4',
     ]);
   });
+
+  it('supports dynamic batching with minConsecutive and maxConsecutive in runtime_balanced mode', () => {
+    // Show A is a 20-minute comedy (1,200,000 ms)
+    // Show B is a 60-minute drama (3,600,000 ms)
+    // With minConsecutive = 1 and maxConsecutive = 3:
+    // Show A (shorter) gets batch size 3 (3 x 20m = 60m block)
+    // Show B (longer) gets batch size 1 (1 x 60m = 60m block)
+    const showA: ShowConfig = {
+      ratingKey: 'A',
+      title: 'Comedy (20m)',
+      episodes: [
+        { ratingKey: 'A1', showRatingKey: 'A', showTitle: 'Comedy', seasonNumber: 1, episodeNumber: 1, title: 'C1', duration: 1200000 },
+        { ratingKey: 'A2', showRatingKey: 'A', showTitle: 'Comedy', seasonNumber: 1, episodeNumber: 2, title: 'C2', duration: 1200000 },
+        { ratingKey: 'A3', showRatingKey: 'A', showTitle: 'Comedy', seasonNumber: 1, episodeNumber: 3, title: 'C3', duration: 1200000 },
+        { ratingKey: 'A4', showRatingKey: 'A', showTitle: 'Comedy', seasonNumber: 1, episodeNumber: 4, title: 'C4', duration: 1200000 },
+        { ratingKey: 'A5', showRatingKey: 'A', showTitle: 'Comedy', seasonNumber: 1, episodeNumber: 5, title: 'C5', duration: 1200000 },
+        { ratingKey: 'A6', showRatingKey: 'A', showTitle: 'Comedy', seasonNumber: 1, episodeNumber: 6, title: 'C6', duration: 1200000 },
+      ],
+    };
+
+    const showB: ShowConfig = {
+      ratingKey: 'B',
+      title: 'Drama (60m)',
+      episodes: [
+        { ratingKey: 'B1', showRatingKey: 'B', showTitle: 'Drama', seasonNumber: 1, episodeNumber: 1, title: 'D1', duration: 3600000 },
+        { ratingKey: 'B2', showRatingKey: 'B', showTitle: 'Drama', seasonNumber: 1, episodeNumber: 2, title: 'D2', duration: 3600000 },
+      ],
+    };
+
+    const result = interleaveEpisodes([showA, showB], {
+      mode: 'runtime_balanced',
+      minConsecutive: 1,
+      maxConsecutive: 3,
+    });
+
+    expect(result.length).toBe(8);
+    // Verified 3-in-a-row for comedy (60m) followed by 1 drama (60m):
+    expect(result.map((r) => r.title)).toEqual([
+      'C1', 'C2', 'C3',
+      'D1',
+      'C4', 'C5', 'C6',
+      'D2',
+    ]);
+  });
 });

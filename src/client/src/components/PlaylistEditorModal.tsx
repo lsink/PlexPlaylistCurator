@@ -43,7 +43,8 @@ export const PlaylistEditorModal: React.FC<PlaylistEditorModalProps> = ({
   const [mode, setMode] = useState<InterleaveMode>('auto_proportional');
   const [bufferSize, setBufferSize] = useState(30);
   const [unwatchedOnly, setUnwatchedOnly] = useState(true);
-  const [consecutiveEpisodes, setConsecutiveEpisodes] = useState(1);
+  const [minConsecutive, setMinConsecutive] = useState(1);
+  const [maxConsecutive, setMaxConsecutive] = useState(1);
   const [enabled, setEnabled] = useState(true);
   const [shows, setShows] = useState<ShowItem[]>([]);
   const [showPickerOpen, setShowPickerOpen] = useState(false);
@@ -60,7 +61,10 @@ export const PlaylistEditorModal: React.FC<PlaylistEditorModalProps> = ({
         setMode(playlist.mode);
         setBufferSize(playlist.buffer_size);
         setUnwatchedOnly(playlist.unwatchedOnly);
-        setConsecutiveEpisodes(playlist.consecutiveEpisodes || 1);
+        const minVal = playlist.minConsecutiveEpisodes || playlist.consecutiveEpisodes || 1;
+        const maxVal = playlist.maxConsecutiveEpisodes || minVal;
+        setMinConsecutive(minVal);
+        setMaxConsecutive(maxVal);
         setEnabled(playlist.enabled);
         setShows([...playlist.shows]);
       } else {
@@ -69,7 +73,8 @@ export const PlaylistEditorModal: React.FC<PlaylistEditorModalProps> = ({
         setMode('auto_proportional');
         setBufferSize(30);
         setUnwatchedOnly(true);
-        setConsecutiveEpisodes(1);
+        setMinConsecutive(1);
+        setMaxConsecutive(1);
         setEnabled(true);
         setShows([]);
       }
@@ -151,7 +156,9 @@ export const PlaylistEditorModal: React.FC<PlaylistEditorModalProps> = ({
         mode,
         bufferSize: Number(bufferSize),
         unwatchedOnly,
-        consecutiveEpisodes: Number(consecutiveEpisodes) || 1,
+        consecutiveEpisodes: Number(minConsecutive) || 1,
+        minConsecutiveEpisodes: Number(minConsecutive) || 1,
+        maxConsecutiveEpisodes: Math.max(Number(minConsecutive) || 1, Number(maxConsecutive) || 1),
         enabled,
         shows: shows.map((s, idx) => ({
           ratingKey: s.ratingKey,
@@ -358,24 +365,48 @@ export const PlaylistEditorModal: React.FC<PlaylistEditorModalProps> = ({
 
                 <div>
                   <label className="block text-xs font-semibold uppercase tracking-wider text-gray-400 mb-1.5">
-                    Episodes in a Row per Show (Optional)
+                    Episodes in a Row (Min / Max Range)
                   </label>
-                  <div className="flex items-center space-x-2">
-                    <input
-                      type="number"
-                      min="1"
-                      max="10"
-                      step="1"
-                      value={consecutiveEpisodes}
-                      onChange={(e) => setConsecutiveEpisodes(Math.max(1, Number(e.target.value) || 1))}
-                      className="w-24 bg-[#22262b] border border-[#343b42] text-white rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-amber-500"
-                    />
+                  <div className="flex flex-wrap items-center gap-2">
+                    <div className="flex items-center space-x-1.5 bg-[#22262b] border border-[#343b42] rounded-lg px-2.5 py-1">
+                      <span className="text-xs text-gray-400 font-medium">Min:</span>
+                      <input
+                        type="number"
+                        min="1"
+                        max="10"
+                        step="1"
+                        value={minConsecutive}
+                        onChange={(e) => {
+                          const val = Math.max(1, Number(e.target.value) || 1);
+                          setMinConsecutive(val);
+                          if (maxConsecutive < val) setMaxConsecutive(val);
+                        }}
+                        className="w-12 bg-transparent text-white text-sm focus:outline-none"
+                      />
+                    </div>
+
+                    <div className="flex items-center space-x-1.5 bg-[#22262b] border border-[#343b42] rounded-lg px-2.5 py-1">
+                      <span className="text-xs text-gray-400 font-medium">Max:</span>
+                      <input
+                        type="number"
+                        min={minConsecutive}
+                        max="10"
+                        step="1"
+                        value={maxConsecutive}
+                        onChange={(e) => {
+                          const val = Math.max(minConsecutive, Number(e.target.value) || minConsecutive);
+                          setMaxConsecutive(val);
+                        }}
+                        className="w-12 bg-transparent text-white text-sm focus:outline-none"
+                      />
+                    </div>
+
                     <span className="text-xs text-gray-400">
-                      in a row (Default: 1)
+                      in a row (Default: 1–1)
                     </span>
                   </div>
                   <p className="text-[11px] text-gray-500 mt-1">
-                    Play 2+ episodes of the same show before rotating to reduce bouncing between different shows.
+                    Set a range (e.g. 1 to 3) to let shorter or larger shows play up to 3 episodes in a block while longer or smaller shows play 1.
                   </p>
                 </div>
               </div>

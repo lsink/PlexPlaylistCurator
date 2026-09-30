@@ -141,11 +141,17 @@ export const PlaylistCard: React.FC<PlaylistCardProps> = ({
           <span className="px-2 py-0.5 rounded text-xs bg-[#292f36] text-gray-300 border border-[#3b434d]">
             {playlist.buffer_size > 0 ? `Rolling ${playlist.buffer_size} eps` : 'Full Queue'}
           </span>
-          {playlist.consecutiveEpisodes && playlist.consecutiveEpisodes > 1 ? (
-            <span className="px-2 py-0.5 rounded text-xs bg-indigo-500/15 text-indigo-300 border border-indigo-500/30 font-medium">
-              {playlist.consecutiveEpisodes} in a row
-            </span>
-          ) : null}
+          {(() => {
+            const minC = playlist.minConsecutiveEpisodes || playlist.consecutiveEpisodes || 1;
+            const maxC = playlist.maxConsecutiveEpisodes || minC;
+            if (minC === 1 && maxC === 1) return null;
+            const label = minC === maxC ? `${minC} in a row` : `${minC}–${maxC} in a row`;
+            return (
+              <span className="px-2 py-0.5 rounded text-xs bg-indigo-500/15 text-indigo-300 border border-indigo-500/30 font-medium">
+                {label}
+              </span>
+            );
+          })()}
           {playlist.unwatchedOnly && (
             <span className="px-2 py-0.5 rounded text-xs bg-[#292f36] text-amber-300/90 border border-[#3b434d]">
               Unwatched Only

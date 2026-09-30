@@ -136,8 +136,11 @@ To make playlists advance instantly when you finish an episode:
 | **Manual Weighted Override** | Multiplies show frequency based on custom integer weights you set (e.g. Show A = 2, Show B = 1) with smooth spacing. | Custom TV channel block vibes (e.g. 2 cartoons for every 1 drama). |
 | **Chronological Air Date** | Orders all episodes across selected series by their original broadcast release date. | Franchise viewing orders (e.g. Arrowverse, Star Trek, Marvel Defenders). |
 
-> 💡 **Mini-Binge Option (Episodes in a Row):**
-> You can set **Episodes in a Row per Show** (e.g. 2 or 3) on any playlist. When set, each show plays 2 or 3 sequential episodes when its turn arrives before rotating to the next show, dramatically reducing show-hopping while preserving the overall rotation! (Default is `1` for classic rotation).
+> 💡 **Mini-Binge Option (Episodes in a Row — Min/Max Range):**
+> You can set a **Min and Max Episodes in a Row** range (e.g. `Min: 1, Max: 3`) on any playlist.
+> - **In Runtime-Balanced mode:** Shorter shows (e.g. 20-min sitcoms) automatically receive the max batch size (3 episodes $\approx$ 60 min), while longer shows (e.g. 60-min dramas) receive 1 episode (60 min), creating natural 1-hour viewing blocks with zero show-hopping!
+> - **In Auto-Proportional mode:** Larger shows play up to the max batch size to chew through their backlog, while smaller miniseries play the min batch size to last longer.
+> - **Fixed batches:** Setting `Min: 2, Max: 2` simply plays exactly 2 in a row for all shows. (Default is `1–1` for classic 1-by-1 rotation).
 
 ---
 

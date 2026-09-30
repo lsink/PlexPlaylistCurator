@@ -23,6 +23,8 @@ export interface Playlist {
   buffer_size: number;
   unwatchedOnly: boolean;
   consecutiveEpisodes?: number;
+  minConsecutiveEpisodes?: number;
+  maxConsecutiveEpisodes?: number;
   enabled: boolean;
   last_synced_at: string | null;
   last_sync_status: string | null;
