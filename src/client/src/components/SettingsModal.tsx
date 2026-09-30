@@ -117,10 +117,42 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
 
   const webhookUrl = `${window.location.origin}/api/webhook/plex`;
 
-  const copyToClipboard = (text: string) => {
-    navigator.clipboard.writeText(text);
-    setCopiedWebhook(true);
-    setTimeout(() => setCopiedWebhook(false), 2000);
+  const copyToClipboard = async (text: string) => {
+    let copied = false;
+
+    // Try modern Async Clipboard API first (works in HTTPS / localhost)
+    if (navigator.clipboard && window.isSecureContext) {
+      try {
+        await navigator.clipboard.writeText(text);
+        copied = true;
+      } catch {
+        copied = false;
+      }
+    }
+
+    // Fallback for non-secure contexts (e.g. HTTP on local LAN IP like http://192.168.x.x)
+    if (!copied) {
+      try {
+        const textArea = document.createElement('textarea');
+        textArea.value = text;
+        textArea.style.position = 'fixed';
+        textArea.style.top = '-9999px';
+        textArea.style.left = '-9999px';
+        textArea.setAttribute('readonly', '');
+        document.body.appendChild(textArea);
+        textArea.select();
+        textArea.setSelectionRange(0, 99999);
+        copied = document.execCommand('copy');
+        document.body.removeChild(textArea);
+      } catch (e) {
+        console.error('Failed to copy to clipboard', e);
+      }
+    }
+
+    if (copied) {
+      setCopiedWebhook(true);
+      setTimeout(() => setCopiedWebhook(false), 2000);
+    }
   };
 
   if (!isOpen) return null;
@@ -300,15 +332,30 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                 type="text"
                 readOnly
                 value={webhookUrl}
-                className="flex-1 bg-[#16181b] border border-[#2d3238] text-gray-300 text-xs font-mono rounded-lg px-3 py-2 select-all focus:outline-none"
+                onClick={(e) => (e.target as HTMLInputElement).select()}
+                className="flex-1 bg-[#16181b] border border-[#2d3238] text-gray-300 text-xs font-mono rounded-lg px-3 py-2 select-all focus:outline-none focus:border-amber-500 cursor-pointer"
+                title="Click to select all"
               />
               <button
                 type="button"
                 onClick={() => copyToClipboard(webhookUrl)}
-                className="flex items-center space-x-1.5 bg-[#252a30] hover:bg-[#343b44] text-gray-200 text-xs px-3 py-2 rounded-lg border border-[#373e47] transition-colors cursor-pointer shrink-0"
+                className={`flex items-center space-x-1.5 px-3 py-2 rounded-lg border transition-colors cursor-pointer shrink-0 text-xs font-semibold ${
+                  copiedWebhook
+                    ? 'bg-emerald-500/20 border-emerald-500/40 text-emerald-400'
+                    : 'bg-[#252a30] hover:bg-[#343b44] text-gray-200 border-[#373e47]'
+                }`}
               >
-                <Copy className="w-3.5 h-3.5" />
-                <span>{copiedWebhook ? 'Copied!' : 'Copy'}</span>
+                {copiedWebhook ? (
+                  <>
+                    <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" />
+                    <span>Copied!</span>
+                  </>
+                ) : (
+                  <>
+                    <Copy className="w-3.5 h-3.5" />
+                    <span>Copy</span>
+                  </>
+                )}
               </button>
             </div>
           </div>
