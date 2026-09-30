@@ -1,0 +1,66 @@
+import { Router } from 'express';
+import { SyncService } from '../services/syncService.js';
+import { requireAuth } from '../middleware/auth.js';
+
+const router = Router();
+
+// Get TV Show libraries
+router.get('/libraries', requireAuth, async (req, res) => {
+  try {
+    const plex = SyncService.getPlexService();
+    const libraries = await plex.getShowLibraries();
+    res.json(libraries);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message || 'Failed to fetch TV libraries' });
+  }
+});
+
+// Get shows in a library section
+router.get('/shows', requireAuth, async (req, res) => {
+  const sectionKey = req.query.sectionKey as string;
+  if (!sectionKey) {
+    return res.status(400).json({ error: 'sectionKey query parameter is required' });
+  }
+
+  try {
+    const plex = SyncService.getPlexService();
+    const shows = await plex.getShows(sectionKey);
+    res.json(shows);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message || 'Failed to fetch shows' });
+  }
+});
+
+// Search shows across libraries
+router.get('/search', requireAuth, async (req, res) => {
+  const query = (req.query.q as string) || '';
+  if (!query.trim()) {
+    return res.json([]);
+  }
+
+  try {
+    const plex = SyncService.getPlexService();
+    const results = await plex.searchShows(query.trim());
+    res.json(results);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message || 'Search failed' });
+  }
+});
+
+// Mark show as unwatched
+router.post('/unscrobble', requireAuth, async (req, res) => {
+  const { showRatingKey } = req.body;
+  if (!showRatingKey) {
+    return res.status(400).json({ error: 'showRatingKey is required' });
+  }
+
+  try {
+    const plex = SyncService.getPlexService();
+    await plex.markShowUnwatched(showRatingKey);
+    res.json({ success: true, message: 'Show marked as unwatched in Plex.' });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message || 'Failed to unscrobble show' });
+  }
+});
+
+export default router;

@@ -1,0 +1,17 @@
+version: '3.8'
+
+services:
+  plex-playlist-creator:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: plex-playlist-creator
+    restart: unless-stopped
+    ports:
+      - "32500:32500"
+    volumes:
+      - ./data:/data
+    environment:
+      - PORT=32500
+      - DATA_DIR=/data
+      - SESSION_SECRET=plex-playlist-creator-secret-key-change-me

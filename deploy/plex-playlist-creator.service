@@ -1,0 +1,20 @@
+[Unit]
+Description=Plex Interleaved Playlist Creator Service
+After=network.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/opt/plex-playlist-creator
+Environment=NODE_ENV=production
+Environment=PORT=32500
+Environment=DATA_DIR=/opt/plex-playlist-creator/data
+ExecStart=/usr/bin/node dist/server/index.js
+Restart=always
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=plex-playlist-creator
+
+[Install]
+WantedBy=multi-user.target
