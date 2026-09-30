@@ -128,9 +128,16 @@ export const QueuePreviewModal: React.FC<QueuePreviewModalProps> = ({
                   </h4>
                   <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
                     {preview.showStats.map((stat) => {
-                      const countInQueue = preview.episodes.filter(
+                      const showEpisodes = preview.episodes.filter(
                         (e) => e.showRatingKey === stat.ratingKey || e.showTitle === stat.title
-                      ).length;
+                      );
+                      const countInQueue = showEpisodes.length;
+                      const totalDurationMs = showEpisodes.reduce((acc, e) => acc + (e.duration || 0), 0);
+                      const totalMinutes = Math.round(totalDurationMs / 60000);
+                      const durationFormatted = totalMinutes >= 60
+                        ? `${Math.floor(totalMinutes / 60)}h ${totalMinutes % 60}m`
+                        : `${totalMinutes}m`;
+
                       const percentage =
                         preview.totalEpisodesInQueue > 0
                           ? Math.round((countInQueue / preview.totalEpisodesInQueue) * 100)
@@ -143,7 +150,9 @@ export const QueuePreviewModal: React.FC<QueuePreviewModalProps> = ({
                         >
                           <p className="text-xs font-semibold text-gray-200 truncate">{stat.title}</p>
                           <div className="flex items-baseline justify-between mt-1 text-xs">
-                            <span className="text-amber-400 font-bold font-mono">{countInQueue} eps</span>
+                            <span className="text-amber-400 font-bold font-mono">
+                              {countInQueue} eps {totalMinutes > 0 && <span className="text-[10px] text-gray-400 font-normal">({durationFormatted})</span>}
+                            </span>
                             <span className="text-[11px] text-gray-400">{percentage}%</span>
                           </div>
                           <div className="w-full bg-[#16181b] h-1.5 rounded-full mt-1.5 overflow-hidden">

@@ -17,7 +17,7 @@ export interface ShowConfig {
   episodes: EpisodeItem[];
 }
 
-export type InterleaveMode = 'round_robin' | 'auto_proportional' | 'manual_weighted' | 'chronological';
+export type InterleaveMode = 'round_robin' | 'auto_proportional' | 'manual_weighted' | 'chronological' | 'runtime_balanced';
 
 export interface InterleaveOptions {
   mode: InterleaveMode;
@@ -53,6 +53,8 @@ export function interleaveEpisodes(
       return interleaveManualWeighted(activeShows, bufferSize);
     case 'chronological':
       return interleaveChronological(activeShows, bufferSize);
+    case 'runtime_balanced':
+      return interleaveRuntimeBalanced(activeShows, bufferSize);
     default:
       return interleaveRoundRobin(activeShows, bufferSize);
   }
@@ -191,4 +193,33 @@ function interleaveChronological(shows: ShowConfig[], bufferSize: number): Episo
   });
 
   return allEpisodes.slice(0, bufferSize);
+}
+
+/**
+ * Runtime / Duration-Balanced Interleaving (Smooth Weighted Round-Robin):
+ * Balances watch time across shows based on average episode length.
+ * Shorter episodes (e.g. 22-min sitcoms) receive higher frequency weights than longer episodes (e.g. 50-min dramas),
+ * resulting in equal viewing time per series.
+ */
+function interleaveRuntimeBalanced(shows: ShowConfig[], bufferSize: number): EpisodeItem[] {
+  // Calculate average duration in minutes for each show
+  const avgDurations = shows.map((s) => {
+    const episodesWithDuration = s.episodes.filter(
+      (e) => typeof e.duration === 'number' && e.duration > 0
+    );
+    if (episodesWithDuration.length === 0) {
+      return 30; // default 30 mins
+    }
+    const totalMs = episodesWithDuration.reduce((acc, e) => acc + (e.duration || 0), 0);
+    const avgMinutes = totalMs / episodesWithDuration.length / 60000;
+    return Math.max(5, avgMinutes); // at least 5 mins
+  });
+
+  const maxAvgDuration = Math.max(...avgDurations);
+
+  // Weights are inversely proportional to duration:
+  // e.g. If max show is 50m and current show is 25m, weight is round(50/25) = 2
+  const weights = avgDurations.map((dur) => Math.max(1, Math.round(maxAvgDuration / dur)));
+
+  return executeSWRR(shows, weights, bufferSize);
 }

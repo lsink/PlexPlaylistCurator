@@ -68,6 +68,13 @@ export const PlaylistCard: React.FC<PlaylistCardProps> = ({
             Chronological Air Date
           </span>
         );
+      case 'runtime_balanced':
+        return (
+          <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-medium bg-cyan-500/15 text-cyan-300 border border-cyan-500/30">
+            <Clock className="w-3 h-3" />
+            Runtime-Balanced (Watch Time)
+          </span>
+        );
       case 'round_robin':
       default:
         return (

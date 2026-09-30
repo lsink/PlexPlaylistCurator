@@ -1,4 +1,4 @@
-export type InterleaveMode = 'round_robin' | 'auto_proportional' | 'manual_weighted' | 'chronological';
+export type InterleaveMode = 'round_robin' | 'auto_proportional' | 'manual_weighted' | 'chronological' | 'runtime_balanced';
 
 export interface ShowItem {
   id?: string;

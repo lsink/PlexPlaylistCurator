@@ -13,6 +13,7 @@ import {
   Check,
   Eye,
   Sliders,
+  Clock,
 } from 'lucide-react';
 import { Playlist, ShowItem, InterleaveMode } from '../types';
 import { ShowPickerModal } from './ShowPickerModal';
@@ -302,6 +303,24 @@ export const PlaylistEditorModal: React.FC<PlaylistEditorModalProps> = ({
                   </div>
                   <p className="text-xs text-gray-400">
                     Interleaves episodes strictly by original release date. Great for shared TV universes or crossover events.
+                  </p>
+                </div>
+
+                {/* Runtime-Balanced (Watch Time) */}
+                <div
+                  onClick={() => setMode('runtime_balanced')}
+                  className={`p-3.5 rounded-xl border transition-all cursor-pointer sm:col-span-2 ${
+                    mode === 'runtime_balanced'
+                      ? 'border-cyan-500 bg-cyan-500/10 ring-1 ring-cyan-500/40'
+                      : 'border-[#2e343b] hover:border-[#424953] bg-[#22262b]'
+                  }`}
+                >
+                  <div className="flex items-center space-x-2 font-semibold text-sm text-white mb-1">
+                    <Clock className="w-4 h-4 text-cyan-400" />
+                    <span>Runtime-Balanced (Watch Time)</span>
+                  </div>
+                  <p className="text-xs text-gray-400">
+                    Balances watch time using episode duration metadata from Plex. Automatically plays ~2 episodes of a 22-min sitcom for every 1 episode of a 50-min drama so you spend equal time on each series.
                   </p>
                 </div>
               </div>

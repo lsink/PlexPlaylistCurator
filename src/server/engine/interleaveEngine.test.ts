@@ -191,4 +191,45 @@ describe('interleaveEngine', () => {
     });
     expect(result.map((r) => r.title)).toEqual(['A1', 'B1', 'A2', 'B2']);
   });
+
+  it('handles runtime_balanced mode based on episode duration', () => {
+    // Show A has 20-minute episodes (1,200,000 ms)
+    // Show B has 60-minute episodes (3,600,000 ms)
+    // Pacing ratio is 3:1 (3 episodes of Show A per 1 episode of Show B)
+    const showA: ShowConfig = {
+      ratingKey: 'A',
+      title: 'Comedy (20m)',
+      episodes: [
+        { ratingKey: 'A1', showRatingKey: 'A', showTitle: 'Comedy (20m)', seasonNumber: 1, episodeNumber: 1, title: 'C1', duration: 1200000 },
+        { ratingKey: 'A2', showRatingKey: 'A', showTitle: 'Comedy (20m)', seasonNumber: 1, episodeNumber: 2, title: 'C2', duration: 1200000 },
+        { ratingKey: 'A3', showRatingKey: 'A', showTitle: 'Comedy (20m)', seasonNumber: 1, episodeNumber: 3, title: 'C3', duration: 1200000 },
+        { ratingKey: 'A4', showRatingKey: 'A', showTitle: 'Comedy (20m)', seasonNumber: 1, episodeNumber: 4, title: 'C4', duration: 1200000 },
+        { ratingKey: 'A5', showRatingKey: 'A', showTitle: 'Comedy (20m)', seasonNumber: 1, episodeNumber: 5, title: 'C5', duration: 1200000 },
+        { ratingKey: 'A6', showRatingKey: 'A', showTitle: 'Comedy (20m)', seasonNumber: 1, episodeNumber: 6, title: 'C6', duration: 1200000 },
+      ],
+    };
+
+    const showB: ShowConfig = {
+      ratingKey: 'B',
+      title: 'Drama (60m)',
+      episodes: [
+        { ratingKey: 'B1', showRatingKey: 'B', showTitle: 'Drama (60m)', seasonNumber: 1, episodeNumber: 1, title: 'D1', duration: 3600000 },
+        { ratingKey: 'B2', showRatingKey: 'B', showTitle: 'Drama (60m)', seasonNumber: 1, episodeNumber: 2, title: 'D2', duration: 3600000 },
+      ],
+    };
+
+    const result = interleaveEpisodes([showA, showB], {
+      mode: 'runtime_balanced',
+    });
+
+    expect(result.length).toBe(8);
+    // Verified 3:1 smooth distribution pattern: C1, C2, D1, C3, C4, C5, D2, C6
+    const titles = result.map((r) => r.title);
+    expect(titles).toEqual(['C1', 'C2', 'D1', 'C3', 'C4', 'C5', 'D2', 'C6']);
+    expect(result.filter((r) => r.showRatingKey === 'A').length).toBe(6);
+    expect(result.filter((r) => r.showRatingKey === 'B').length).toBe(2);
+    // Sequential order maintained
+    expect(result.filter((r) => r.showRatingKey === 'A').map((r) => r.episodeNumber)).toEqual([1, 2, 3, 4, 5, 6]);
+    expect(result.filter((r) => r.showRatingKey === 'B').map((r) => r.episodeNumber)).toEqual([1, 2]);
+  });
 });
