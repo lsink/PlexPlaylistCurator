@@ -67,6 +67,18 @@ export const PlaylistEditorModal: React.FC<PlaylistEditorModalProps> = ({
         setMaxConsecutive(maxVal);
         setEnabled(playlist.enabled);
         setShows([...playlist.shows]);
+
+        // Auto-refresh stats if any show has missing episode/unwatched counts
+        const hasMissingStats = playlist.shows.some(
+          (s) => s.unwatchedEpisodes === undefined || s.unwatchedEpisodes === null
+        );
+        if (hasMissingStats && playlist.id) {
+          api.refreshPlaylistStats(playlist.id).then((res) => {
+            if (res.shows && res.shows.length > 0) {
+              setShows(res.shows);
+            }
+          }).catch(() => {});
+        }
       } else {
         setName('');
         setPlexPlaylistTitle('');
@@ -129,6 +141,13 @@ export const PlaylistEditorModal: React.FC<PlaylistEditorModalProps> = ({
       setUnscrobblingKey(showRatingKey);
       await api.unscrobbleShow(showRatingKey);
       setUnscrobbledSuccessKey(showRatingKey);
+      setShows((prev) =>
+        prev.map((s) =>
+          s.ratingKey === showRatingKey
+            ? { ...s, unwatchedEpisodes: s.totalEpisodes ?? s.unwatchedEpisodes }
+            : s
+        )
+      );
       setTimeout(() => setUnscrobbledSuccessKey(null), 3000);
     } catch (err: any) {
       alert(`Failed to unscrobble show: ${err.message}`);
@@ -164,6 +183,9 @@ export const PlaylistEditorModal: React.FC<PlaylistEditorModalProps> = ({
           ratingKey: s.ratingKey,
           title: s.title,
           thumb: s.thumb,
+          seasonCount: s.seasonCount,
+          totalEpisodes: s.totalEpisodes,
+          unwatchedEpisodes: s.unwatchedEpisodes,
           sortOrder: idx,
           manualWeight: s.manualWeight || 1,
         })),
@@ -179,8 +201,8 @@ export const PlaylistEditorModal: React.FC<PlaylistEditorModalProps> = ({
   };
 
   const getPosterUrl = (thumb?: string | null) => {
-    if (!thumb || !plexUrl) return null;
-    return `${plexUrl}${thumb}?X-Plex-Token=${plexToken}`;
+    if (!thumb) return null;
+    return `/api/plex/image?path=${encodeURIComponent(thumb)}`;
   };
 
   if (!isOpen) return null;
@@ -499,9 +521,13 @@ export const PlaylistEditorModal: React.FC<PlaylistEditorModalProps> = ({
                           <div className="min-w-0">
                             <p className="text-sm font-semibold text-white truncate">{show.title}</p>
                             <p className="text-xs text-gray-400">
-                              {show.seasonCount ? `${show.seasonCount} seasons • ` : ''}
+                              {show.seasonCount ? `${show.seasonCount} ${show.seasonCount === 1 ? 'season' : 'seasons'} • ` : ''}
                               <span className="text-amber-400">
-                                {show.unwatchedEpisodes ?? show.totalEpisodes ?? 0} unwatched
+                                {show.unwatchedEpisodes !== undefined && show.unwatchedEpisodes !== null
+                                  ? `${show.unwatchedEpisodes} unwatched`
+                                  : show.totalEpisodes !== undefined && show.totalEpisodes !== null
+                                  ? `${show.totalEpisodes} episodes`
+                                  : 'Loading stats...'}
                               </span>
                             </p>
                           </div>

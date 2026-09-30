@@ -50,6 +50,7 @@ export const api = {
   // Plex
   getLibraries: () => request<Array<{ key: string; title: string; type: string }>>('/api/plex/libraries'),
   getShows: (sectionKey: string) => request<ShowItem[]>(`/api/plex/shows?sectionKey=${sectionKey}`),
+  getShowDetails: (ratingKey: string) => request<ShowItem>(`/api/plex/shows/${ratingKey}`),
   searchShows: (q: string) => request<ShowItem[]>(`/api/plex/search?q=${encodeURIComponent(q)}`),
   unscrobbleShow: (showRatingKey: string) => request<{ success: boolean }>('/api/plex/unscrobble', {
     method: 'POST',
@@ -72,6 +73,9 @@ export const api = {
   }),
   getPreview: (id: string) => request<PreviewData>(`/api/playlists/${id}/preview`),
   syncPlaylist: (id: string) => request<{ success: boolean; episodesSynced: number; plexPlaylistId: string }>(`/api/playlists/${id}/sync`, {
+    method: 'POST',
+  }),
+  refreshPlaylistStats: (id: string) => request<{ success: boolean; shows: ShowItem[] }>(`/api/playlists/${id}/refresh-stats`, {
     method: 'POST',
   }),
 

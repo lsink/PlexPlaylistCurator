@@ -86,10 +86,10 @@ export const PlaylistCard: React.FC<PlaylistCardProps> = ({
     }
   };
 
-  // Build thumbnail URL through Plex or fallback
+  // Build thumbnail URL through backend Plex image proxy
   const getPosterUrl = (thumb?: string | null) => {
-    if (!thumb || !plexUrl) return null;
-    return `${plexUrl}${thumb}?X-Plex-Token=${plexToken}`;
+    if (!thumb) return null;
+    return `/api/plex/image?path=${encodeURIComponent(thumb)}`;
   };
 
   return (

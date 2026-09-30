@@ -64,8 +64,8 @@ export const QueuePreviewModal: React.FC<QueuePreviewModalProps> = ({
   };
 
   const getPosterUrl = (thumb?: string | null) => {
-    if (!thumb || !plexUrl) return null;
-    return `${plexUrl}${thumb}?X-Plex-Token=${plexToken}`;
+    if (!thumb) return null;
+    return `/api/plex/image?path=${encodeURIComponent(thumb)}`;
   };
 
   if (!isOpen || !playlist) return null;

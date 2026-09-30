@@ -35,5 +35,14 @@ try {
 try {
   db.exec('ALTER TABLE playlists ADD COLUMN max_consecutive_episodes INTEGER NOT NULL DEFAULT 1');
 } catch {}
+try {
+  db.exec('ALTER TABLE playlist_shows ADD COLUMN season_count INTEGER');
+} catch {}
+try {
+  db.exec('ALTER TABLE playlist_shows ADD COLUMN total_episodes INTEGER');
+} catch {}
+try {
+  db.exec('ALTER TABLE playlist_shows ADD COLUMN unwatched_episodes INTEGER');
+} catch {}
 
 export default db;

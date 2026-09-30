@@ -29,6 +29,9 @@ export interface PlaylistShowRecord {
   plex_show_rating_key: string;
   show_title: string;
   show_thumb: string | null;
+  season_count?: number | null;
+  total_episodes?: number | null;
+  unwatched_episodes?: number | null;
   sort_order: number;
   manual_weight: number;
 }
@@ -42,6 +45,66 @@ export class SyncService {
       throw new Error('Plex server settings are not configured yet.');
     }
     return new PlexService(settings.plex_url, settings.plex_token);
+  }
+
+  /**
+   * Refresh metadata (unwatched count, episodes, seasons, thumb) for all shows in a playlist
+   */
+  public static async refreshPlaylistShowStats(playlistId: string): Promise<any[]> {
+    const playlist = db.prepare('SELECT * FROM playlists WHERE id = ?').get(playlistId) as PlaylistRecord | undefined;
+    if (!playlist) {
+      throw new Error(`Playlist with ID ${playlistId} not found`);
+    }
+
+    const shows = db
+      .prepare('SELECT * FROM playlist_shows WHERE playlist_id = ? ORDER BY sort_order ASC')
+      .all(playlistId) as PlaylistShowRecord[];
+
+    if (shows.length === 0) return [];
+
+    const plex = this.getPlexService();
+    const updateStmt = db.prepare(
+      `UPDATE playlist_shows SET
+        season_count = COALESCE(?, season_count),
+        total_episodes = COALESCE(?, total_episodes),
+        unwatched_episodes = COALESCE(?, unwatched_episodes),
+        show_thumb = COALESCE(?, show_thumb)
+       WHERE id = ?`
+    );
+
+    const refreshedShows = [];
+
+    for (const show of shows) {
+      try {
+        const metadata = await plex.getShowMetadata(show.plex_show_rating_key);
+        if (metadata) {
+          updateStmt.run(
+            metadata.seasonCount,
+            metadata.totalEpisodes,
+            metadata.unwatchedEpisodes,
+            metadata.thumb || show.show_thumb,
+            show.id
+          );
+          refreshedShows.push({
+            id: show.id,
+            ratingKey: show.plex_show_rating_key,
+            title: show.show_title,
+            thumb: metadata.thumb || show.show_thumb,
+            seasonCount: metadata.seasonCount,
+            totalEpisodes: metadata.totalEpisodes,
+            unwatchedEpisodes: metadata.unwatchedEpisodes,
+            sortOrder: show.sort_order,
+            manualWeight: show.manual_weight,
+          });
+        } else {
+          refreshedShows.push(show);
+        }
+      } catch {
+        refreshedShows.push(show);
+      }
+    }
+
+    return refreshedShows;
   }
 
   /**
@@ -65,11 +128,21 @@ export class SyncService {
     const showConfigs: ShowConfig[] = [];
     const showStats: any[] = [];
 
+    const updateUnwatchedStmt = db.prepare(
+      'UPDATE playlist_shows SET unwatched_episodes = ? WHERE playlist_id = ? AND plex_show_rating_key = ?'
+    );
+
     for (const show of shows) {
       const episodes = await plex.getShowEpisodes(
         show.plex_show_rating_key,
         playlist.unwatched_only === 1
       );
+
+      if (playlist.unwatched_only === 1) {
+        try {
+          updateUnwatchedStmt.run(episodes.length, playlistId, show.plex_show_rating_key);
+        } catch {}
+      }
 
       showConfigs.push({
         ratingKey: show.plex_show_rating_key,
@@ -139,12 +212,21 @@ export class SyncService {
 
       const plex = this.getPlexService();
       const showConfigs: ShowConfig[] = [];
+      const updateUnwatchedStmt = db.prepare(
+        'UPDATE playlist_shows SET unwatched_episodes = ? WHERE playlist_id = ? AND plex_show_rating_key = ?'
+      );
 
       for (const show of shows) {
         const episodes = await plex.getShowEpisodes(
           show.plex_show_rating_key,
           playlist.unwatched_only === 1
         );
+
+        if (playlist.unwatched_only === 1) {
+          try {
+            updateUnwatchedStmt.run(episodes.length, playlistId, show.plex_show_rating_key);
+          } catch {}
+        }
 
         showConfigs.push({
           ratingKey: show.plex_show_rating_key,

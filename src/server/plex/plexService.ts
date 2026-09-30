@@ -191,6 +191,48 @@ export class PlexService {
   }
 
   /**
+   * Fetch single show metadata (unwatched count, total leaves, season count, thumb)
+   */
+  async getShowMetadata(ratingKey: string): Promise<PlexShowSummary | null> {
+    try {
+      const response = await this.client.get(`/library/metadata/${ratingKey}`);
+      const item = response.data?.MediaContainer?.Metadata?.[0];
+      if (!item) return null;
+      const totalLeaves = item.leafCount || 0;
+      const viewedLeaves = item.viewedLeafCount || 0;
+      return {
+        ratingKey: String(item.ratingKey),
+        title: item.title,
+        thumb: item.thumb,
+        art: item.art,
+        year: item.year,
+        seasonCount: item.childCount || 1,
+        totalEpisodes: totalLeaves,
+        unwatchedEpisodes: Math.max(0, totalLeaves - viewedLeaves),
+      };
+    } catch (err) {
+      console.error(`Failed to fetch metadata for show ${ratingKey}:`, err);
+      return null;
+    }
+  }
+
+  /**
+   * Fetch image stream from Plex
+   */
+  async getImageStream(imagePath: string): Promise<{ data: any; contentType: string }> {
+    const response = await this.client.get(imagePath, {
+      responseType: 'stream',
+      headers: {
+        'Accept': 'image/*',
+      },
+    });
+    return {
+      data: response.data,
+      contentType: String(response.headers['content-type'] || 'image/jpeg'),
+    };
+  }
+
+  /**
    * Fetch all episodes for a given show, optionally filtering for unwatched only.
    * Episodes are strictly sorted by Season ascending, then Episode ascending.
    */

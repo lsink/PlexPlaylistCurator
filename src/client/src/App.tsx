@@ -313,7 +313,6 @@ export const App: React.FC = () => {
                 key={playlist.id}
                 playlist={playlist}
                 plexUrl={settings?.plexUrl}
-                plexToken={settings?.plexTokenMasked ? settings.plexUrl : ''}
                 onSync={handleSyncPlaylist}
                 onPreview={openPreview}
                 onEdit={openEditorForEdit}

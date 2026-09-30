@@ -26,6 +26,9 @@ router.get('/', requireAuth, (req, res) => {
       ratingKey: s.plex_show_rating_key,
       title: s.show_title,
       thumb: s.show_thumb,
+      seasonCount: s.season_count,
+      totalEpisodes: s.total_episodes,
+      unwatchedEpisodes: s.unwatched_episodes,
       sortOrder: s.sort_order,
       manualWeight: s.manual_weight,
     })),
@@ -50,6 +53,9 @@ router.get('/:id', requireAuth, (req, res) => {
       ratingKey: s.plex_show_rating_key,
       title: s.show_title,
       thumb: s.show_thumb,
+      seasonCount: s.season_count,
+      totalEpisodes: s.total_episodes,
+      unwatchedEpisodes: s.unwatched_episodes,
       sortOrder: s.sort_order,
       manualWeight: s.manual_weight,
     }));
@@ -105,8 +111,8 @@ router.post('/', requireAuth, async (req, res) => {
 
     if (Array.isArray(shows)) {
       const insertShowStmt = db.prepare(
-        `INSERT INTO playlist_shows (id, playlist_id, plex_show_rating_key, show_title, show_thumb, sort_order, manual_weight)
-         VALUES (?, ?, ?, ?, ?, ?, ?)`
+        `INSERT INTO playlist_shows (id, playlist_id, plex_show_rating_key, show_title, show_thumb, season_count, total_episodes, unwatched_episodes, sort_order, manual_weight)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
       );
 
       shows.forEach((show: any, index: number) => {
@@ -116,6 +122,9 @@ router.post('/', requireAuth, async (req, res) => {
           String(show.ratingKey),
           show.title,
           show.thumb || null,
+          typeof show.seasonCount === 'number' ? show.seasonCount : null,
+          typeof show.totalEpisodes === 'number' ? show.totalEpisodes : null,
+          typeof show.unwatchedEpisodes === 'number' ? show.unwatchedEpisodes : null,
           show.sortOrder ?? index,
           typeof show.manualWeight === 'number' && show.manualWeight > 0 ? show.manualWeight : 1
         );
@@ -190,8 +199,8 @@ router.put('/:id', requireAuth, async (req, res) => {
       db.prepare('DELETE FROM playlist_shows WHERE playlist_id = ?').run(playlistId);
 
       const insertShowStmt = db.prepare(
-        `INSERT INTO playlist_shows (id, playlist_id, plex_show_rating_key, show_title, show_thumb, sort_order, manual_weight)
-         VALUES (?, ?, ?, ?, ?, ?, ?)`
+        `INSERT INTO playlist_shows (id, playlist_id, plex_show_rating_key, show_title, show_thumb, season_count, total_episodes, unwatched_episodes, sort_order, manual_weight)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
       );
 
       shows.forEach((show: any, index: number) => {
@@ -201,6 +210,9 @@ router.put('/:id', requireAuth, async (req, res) => {
           String(show.ratingKey),
           show.title,
           show.thumb || null,
+          typeof show.seasonCount === 'number' ? show.seasonCount : null,
+          typeof show.totalEpisodes === 'number' ? show.totalEpisodes : null,
+          typeof show.unwatchedEpisodes === 'number' ? show.unwatchedEpisodes : null,
           show.sortOrder ?? index,
           typeof show.manualWeight === 'number' && show.manualWeight > 0 ? show.manualWeight : 1
         );
@@ -261,4 +273,16 @@ router.post('/:id/sync', requireAuth, async (req, res) => {
   }
 });
 
+// Refresh show stats from Plex
+router.post('/:id/refresh-stats', requireAuth, async (req, res) => {
+  try {
+    const playlistId = String(req.params.id);
+    const shows = await SyncService.refreshPlaylistShowStats(playlistId);
+    res.json({ success: true, shows });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message || 'Failed to refresh show stats' });
+  }
+});
+
 export default router;
+

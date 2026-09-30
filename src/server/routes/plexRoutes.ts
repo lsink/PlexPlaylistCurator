@@ -63,4 +63,43 @@ router.post('/unscrobble', requireAuth, async (req, res) => {
   }
 });
 
+// Get individual show metadata (unwatched count, episodes, seasons, thumb)
+router.get('/shows/:ratingKey', requireAuth, async (req, res) => {
+  const ratingKey = String(req.params.ratingKey);
+  try {
+    const plex = SyncService.getPlexService();
+    const show = await plex.getShowMetadata(ratingKey);
+    if (!show) {
+      return res.status(404).json({ error: 'Show not found' });
+    }
+    res.json(show);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message || 'Failed to fetch show metadata' });
+  }
+});
+
+// Proxy image from Plex Media Server
+router.get('/image', async (req, res) => {
+  const imagePath = req.query.path as string;
+  if (!imagePath) {
+    return res.status(400).send('Image path is required');
+  }
+
+  // Security: only allow relative Plex paths starting with /
+  if (!imagePath.startsWith('/') || imagePath.startsWith('//') || imagePath.includes('://')) {
+    return res.status(400).send('Invalid image path');
+  }
+
+  try {
+    const plex = SyncService.getPlexService();
+    const { data, contentType } = await plex.getImageStream(imagePath);
+    res.setHeader('Content-Type', contentType);
+    res.setHeader('Cache-Control', 'public, max-age=86400');
+    data.pipe(res);
+  } catch (err: any) {
+    res.status(404).send('Image not found');
+  }
+});
+
 export default router;
+
