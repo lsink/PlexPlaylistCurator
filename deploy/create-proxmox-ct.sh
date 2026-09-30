@@ -141,9 +141,9 @@ export DEBIAN_FRONTEND=noninteractive
 apt-get update -y
 apt-get install -y curl git build-essential python3
 
-# Install Node.js 22 LTS
+# Install Node.js 24.x
 if ! command -v node >/dev/null 2>&1; then
-  curl -fsSL https://deb.nodesource.com/setup_22.x | bash -
+  curl -fsSL https://deb.nodesource.com/setup_24.x | bash -
   apt-get install -y nodejs
 fi
 

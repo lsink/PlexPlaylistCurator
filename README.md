@@ -53,6 +53,21 @@ chmod +x deploy/install-lxc.sh
 
 ---
 
+## 🔄 Updating to New Versions
+
+### Inside Proxmox LXC Container
+Whenever you want to update to the latest version of the app, simply open your container console and run:
+
+```bash
+update
+# or
+plex-update
+```
+
+*(This automatically fetches the latest code from GitHub, updates packages, recompiles the production build, and restarts the background service without touching your database or settings in `./data`.)*
+
+---
+
 ## 🐳 Docker / Docker Compose Deployment
 
 If you run Docker inside Proxmox or on another server:

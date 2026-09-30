@@ -53,6 +53,7 @@ export interface PreviewData {
 }
 
 export interface SettingsData {
+  appVersion?: string;
   plexUrl: string;
   plexTokenMasked: string;
   hasToken: boolean;

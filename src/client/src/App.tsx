@@ -326,7 +326,7 @@ export const App: React.FC = () => {
 
       {/* Footer */}
       <footer className="bg-[#141618] border-t border-[#25292e] py-4 text-center text-xs text-gray-500">
-        <p>Plex Interleaved Playlist Creator • Optimized for Proxmox LXC Containers & Docker</p>
+        <p>Plex Playlist Curator v{settings?.appVersion || '1.0.0'} • Optimized for Proxmox LXC & Docker</p>
       </footer>
 
       {/* Modals */}

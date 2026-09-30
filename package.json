@@ -12,7 +12,12 @@
     "build:server": "tsc -p tsconfig.server.json",
     "build": "npm run build:client && npm run build:server",
     "start": "node dist/server/index.js",
-    "test": "vitest run --config vitest.config.ts"
+    "test": "vitest run --config vitest.config.ts",
+    "update": "bash deploy/update-lxc.sh"
+  },
+  "engines": {
+    "node": ">=22.0.0",
+    "npm": ">=11.0.0"
   },
   "dependencies": {
     "axios": "^1.7.9",

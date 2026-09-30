@@ -4,6 +4,8 @@ import { PlexService } from '../plex/plexService.js';
 import { updateSyncSchedule } from '../services/syncScheduler.js';
 import { requireAuth } from '../middleware/auth.js';
 
+import { APP_VERSION } from '../version.js';
+
 const router = Router();
 
 // Get settings
@@ -15,6 +17,7 @@ router.get('/', requireAuth, (req, res) => {
   const maskedToken = rawToken ? `••••••••${rawToken.slice(-4)}` : '';
 
   res.json({
+    appVersion: APP_VERSION,
     plexUrl: settings?.plex_url || '',
     plexTokenMasked: maskedToken,
     hasToken: Boolean(rawToken),

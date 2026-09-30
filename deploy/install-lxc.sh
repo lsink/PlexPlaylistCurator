@@ -24,9 +24,9 @@ apt-get update -y
 apt-get install -y curl git build-essential python3
 
 # Check Node.js installation
-if ! command -v node > /dev/null 2>&1 || [ "$(node -v | cut -d'.' -f1 | tr -d 'v')" -lt 20 ]; then
-  echo "[2/6] Installing Node.js LTS (22.x)..."
-  curl -fsSL https://deb.nodesource.com/setup_22.x | bash -
+if ! command -v node > /dev/null 2>&1 || [ "$(node -v | cut -d'.' -f1 | tr -d 'v')" -lt 22 ]; then
+  echo "[2/6] Installing Node.js 24.x..."
+  curl -fsSL https://deb.nodesource.com/setup_24.x | bash -
   apt-get install -y nodejs
 else
   echo "[2/6] Node.js is already installed ($(node -v))."
@@ -81,6 +81,11 @@ EOF
 systemctl daemon-reload
 systemctl enable --now plex-playlist-creator
 
+# Configure global update command
+chmod +x "${APP_DIR}/deploy/update-lxc.sh"
+ln -sf "${APP_DIR}/deploy/update-lxc.sh" /usr/local/bin/plex-update
+ln -sf "${APP_DIR}/deploy/update-lxc.sh" /usr/local/bin/update 2>/dev/null || true
+
 # Fetch local IP address
 LOCAL_IP="$(hostname -I | awk '{print $1}')"
 if [ -z "${LOCAL_IP}" ]; then
@@ -100,6 +105,7 @@ if systemctl is-active --quiet plex-playlist-creator; then
   echo "   http://${LOCAL_IP}:32500/api/webhook/plex"
   echo ""
   echo " Useful commands:"
+  echo "   update                             # Pull latest version and update"
   echo "   systemctl status plex-playlist-creator"
   echo "   journalctl -u plex-playlist-creator -f"
   echo "   systemctl restart plex-playlist-creator"

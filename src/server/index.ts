@@ -15,6 +15,8 @@ import webhookRoutes from './routes/webhookRoutes.js';
 import logRoutes from './routes/logRoutes.js';
 import { initSyncScheduler } from './services/syncScheduler.js';
 
+import { APP_VERSION } from './version.js';
+
 dotenv.config();
 
 const __filename = fileURLToPath(import.meta.url);
@@ -40,10 +42,11 @@ app.use(
   })
 );
 
-// Health check
+// Health check & version
 app.get('/health', (req, res) => {
   res.json({
     status: 'ok',
+    version: APP_VERSION,
     uptime: process.uptime(),
     timestamp: new Date().toISOString(),
   });
@@ -84,7 +87,7 @@ if (staticDir) {
 // Start Server
 app.listen(PORT, '0.0.0.0', () => {
   console.log(`====================================================`);
-  console.log(` Plex Interleaved Playlist Creator`);
+  console.log(` Plex Playlist Curator (v${APP_VERSION})`);
   console.log(` Server listening at: http://0.0.0.0:${PORT}`);
   console.log(` Health check: http://0.0.0.0:${PORT}/health`);
   console.log(` Webhook URL: http://<YOUR-IP>:${PORT}/api/webhook/plex`);

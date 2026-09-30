@@ -29,8 +29,11 @@ export const Navbar: React.FC<NavbarProps> = ({
           </div>
           <div>
             <h1 className="text-lg font-bold tracking-tight text-white flex items-center gap-2">
-              Plex Playlist Creator
-              <span className="text-[10px] uppercase tracking-wider bg-amber-500/20 text-amber-400 font-semibold px-2 py-0.5 rounded border border-amber-500/30">
+              Plex Playlist Curator
+              <span className="text-[10px] font-mono bg-amber-500/20 text-amber-400 font-semibold px-2 py-0.5 rounded border border-amber-500/30">
+                v{settings?.appVersion || '1.0.0'}
+              </span>
+              <span className="hidden sm:inline-block text-[10px] uppercase tracking-wider bg-gray-800 text-gray-300 font-semibold px-2 py-0.5 rounded border border-gray-700">
                 Proxmox LXC
               </span>
             </h1>

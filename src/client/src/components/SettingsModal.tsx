@@ -32,6 +32,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   const [maskedToken, setMaskedToken] = useState('');
   const [autoSyncInterval, setAutoSyncInterval] = useState(30);
   const [newPassword, setNewPassword] = useState('');
+  const [appVersion, setAppVersion] = useState('1.0.0');
 
   const [testing, setTesting] = useState(false);
   const [testResult, setTestResult] = useState<{
@@ -58,6 +59,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   const loadSettings = async () => {
     try {
       const data = await api.getSettings();
+      setAppVersion(data.appVersion || '1.0.0');
       setPlexUrl(data.plexUrl || 'http://192.168.1.100:32400');
       setMaskedToken(data.plexTokenMasked || '');
       setHasToken(data.hasToken);
@@ -335,6 +337,25 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                 Protect your dashboard interface on your local network.
               </p>
             </div>
+          </div>
+
+          <hr className="border-[#2b3036]" />
+
+          {/* Section 5: Version & In-Container Updates */}
+          <div className="bg-[#16181b] p-4 rounded-xl border border-[#2d3238] space-y-2">
+            <div className="flex items-center justify-between">
+              <div>
+                <h4 className="text-xs font-bold uppercase tracking-wider text-amber-400">
+                  Application Version
+                </h4>
+                <p className="text-xs text-gray-300 mt-0.5">
+                  Currently installed: <span className="font-mono font-bold text-white bg-[#22262b] px-2 py-0.5 rounded border border-[#343b42]">v{appVersion}</span>
+                </p>
+              </div>
+            </div>
+            <p className="text-[11px] text-gray-400 leading-relaxed">
+              To update this app inside your Proxmox container, simply run <code className="text-amber-300 font-mono">update</code> or <code className="text-amber-300 font-mono">plex-update</code> in your container console.
+            </p>
           </div>
         </div>
 
