@@ -84,6 +84,19 @@ export interface SettingsData {
   hasWebhookSecret: boolean;
 }
 
+export type WebhookOutcome = 'synced' | 'syncing' | 'no_playlist' | 'ignored' | 'rejected' | 'invalid' | 'error';
+
+export interface WebhookEvent {
+  id: number;
+  received_at: string;
+  event: string | null;
+  show_title: string | null;
+  account: string | null;
+  player: string | null;
+  outcome: WebhookOutcome;
+  detail: string | null;
+}
+
 export interface SyncLog {
   id: string;
   playlist_id: string | null;

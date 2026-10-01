@@ -24,6 +24,9 @@ function checkWebhookSecret(req: Request, res: Response, next: NextFunction) {
   const b = Buffer.from(settings.webhook_secret);
   const valid = a.length === b.length && timingSafeEqual(a, b);
   if (!valid) {
+    const from = req.ip || req.socket.remoteAddress || 'unknown address';
+    console.warn(`[Webhook] rejected: invalid or missing secret (from ${from})`);
+    SyncService.recordWebhookEvent({ outcome: 'rejected', detail: `Invalid or missing webhook secret (from ${from})` });
     return res.status(401).json({ error: 'Invalid webhook secret' });
   }
   next();
@@ -34,6 +37,7 @@ function parseMultipartIfNeeded(req: Request, res: Response, next: NextFunction)
   multipartParser(req, res, (err: any) => {
     if (err) {
       console.error('Failed to parse multipart webhook:', err?.message || err);
+      SyncService.recordWebhookEvent({ outcome: 'invalid', detail: `Could not read multipart body: ${err?.message || err}` });
       return res.status(400).json({ error: 'Invalid multipart payload' });
     }
     next();

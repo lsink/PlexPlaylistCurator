@@ -14,6 +14,7 @@ import playlistRoutes from './routes/playlistRoutes.js';
 import webhookRoutes from './routes/webhookRoutes.js';
 import logRoutes from './routes/logRoutes.js';
 import { initSyncScheduler } from './services/syncScheduler.js';
+import { SyncService } from './services/syncService.js';
 import { SqliteSessionStore } from './db/sessionStore.js';
 import { getSessionSecret } from './config/sessionSecret.js';
 
@@ -100,9 +101,19 @@ if (staticDir) {
 
 // Global error handler — catches synchronous errors from route handlers
 app.use((err: any, req: express.Request, res: express.Response, next: express.NextFunction) => {
-  console.error('[Unhandled Error]', err?.message || err);
+  // Malformed request bodies (bad JSON, oversized payload) are the client's fault, not a server error
+  const status = err?.status >= 400 && err?.status < 500 ? err.status : 500;
+
+  // The body parsers run before the webhook route, so an unreadable webhook body would otherwise leave no trace
+  if (req.path === '/api/webhook/plex' && status < 500) {
+    console.warn(`[Webhook] unreadable request body: ${err?.message || err}`);
+    SyncService.recordWebhookEvent({ outcome: 'invalid', detail: `Could not read request body: ${err?.message || err}` });
+  } else {
+    console.error('[Unhandled Error]', err?.message || err);
+  }
+
   if (!res.headersSent) {
-    res.status(500).json({ error: 'Internal server error' });
+    res.status(status).json({ error: status === 500 ? 'Internal server error' : 'Invalid request' });
   }
 });
 

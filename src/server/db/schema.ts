@@ -65,6 +65,17 @@ CREATE TABLE IF NOT EXISTS sessions (
   expires INTEGER NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS webhook_events (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  received_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  event TEXT,
+  show_title TEXT,
+  account TEXT,
+  player TEXT,
+  outcome TEXT NOT NULL,
+  detail TEXT
+);
+
 -- Performance indexes
 CREATE INDEX IF NOT EXISTS idx_sessions_expires ON sessions (expires);
 CREATE INDEX IF NOT EXISTS idx_playlist_shows_playlist_id ON playlist_shows (playlist_id);

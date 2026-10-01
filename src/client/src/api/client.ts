@@ -1,4 +1,4 @@
-import { Playlist, SettingsData, SyncLog, PreviewData, ShowItem } from '../types';
+import { Playlist, SettingsData, SyncLog, PreviewData, ShowItem, WebhookEvent } from '../types';
 
 async function request<T>(url: string, options?: RequestInit): Promise<T> {
   const res = await fetch(url, {
@@ -98,4 +98,6 @@ export const api = {
   // Logs
   getLogs: () => request<SyncLog[]>('/api/logs'),
   clearLogs: () => request<{ success: boolean }>('/api/logs', { method: 'DELETE' }),
+  getWebhookEvents: () => request<WebhookEvent[]>('/api/logs/webhooks'),
+  clearWebhookEvents: () => request<{ success: boolean }>('/api/logs/webhooks', { method: 'DELETE' }),
 };
