@@ -14,6 +14,8 @@ import playlistRoutes from './routes/playlistRoutes.js';
 import webhookRoutes from './routes/webhookRoutes.js';
 import logRoutes from './routes/logRoutes.js';
 import { initSyncScheduler } from './services/syncScheduler.js';
+import { SqliteSessionStore } from './db/sessionStore.js';
+import { getSessionSecret } from './config/sessionSecret.js';
 
 import { APP_VERSION } from './version.js';
 
@@ -25,6 +27,15 @@ const __dirname = path.dirname(__filename);
 const app = express();
 const PORT = Number(process.env.PORT) || 32500;
 
+// Behind a reverse proxy (nginx, Caddy, Traefik, Nginx Proxy Manager...) set TRUST_PROXY so the real client IP
+// (used by login rate limiting) and the original protocol (used for secure cookies) are seen.
+// Accepts a hop count ("1"), "loopback", or a comma-separated list of IPs/CIDRs. Never trust all proxies blindly:
+// a spoofable X-Forwarded-For lets a client dodge rate limiting.
+const trustProxy = process.env.TRUST_PROXY?.trim();
+if (trustProxy) {
+  app.set('trust proxy', /^\d+$/.test(trustProxy) ? Number(trustProxy) : trustProxy === 'true' ? 1 : trustProxy);
+}
+
 // Middleware
 app.use(cors());
 app.use(express.json({ limit: '10mb' }));
@@ -32,11 +43,12 @@ app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 app.use(cookieParser());
 app.use(
   session({
-    secret: process.env.SESSION_SECRET || 'plex-playlist-creator-secret-key-1337',
+    secret: getSessionSecret(),
+    store: new SqliteSessionStore(),
     resave: false,
     saveUninitialized: false,
     cookie: {
-      secure: false, // Set to true if behind HTTPS reverse proxy with trust proxy
+      secure: 'auto', // Secure when the request arrived over HTTPS (needs TRUST_PROXY behind a TLS-terminating proxy)
       httpOnly: true,
       sameSite: 'lax' as const,
       maxAge: 30 * 24 * 60 * 60 * 1000, // 30 days

@@ -8,7 +8,7 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 // Data directory priority: DATA_DIR env var -> ./data in project root
-const DATA_DIR = process.env.DATA_DIR || path.resolve(process.cwd(), 'data');
+export const DATA_DIR = process.env.DATA_DIR || path.resolve(process.cwd(), 'data');
 
 if (!fs.existsSync(DATA_DIR)) {
   fs.mkdirSync(DATA_DIR, { recursive: true });
@@ -53,6 +53,11 @@ try {
 
 try {
   db.exec('ALTER TABLE playlists ADD COLUMN last_synced_queue TEXT');
+} catch {}
+
+// Existing playlists keep including specials (their previous behaviour); new playlists opt in explicitly
+try {
+  db.exec('ALTER TABLE playlists ADD COLUMN include_specials INTEGER NOT NULL DEFAULT 1');
 } catch {}
 
 // Note: SQLite does not support ALTER COLUMN to change type.

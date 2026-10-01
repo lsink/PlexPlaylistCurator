@@ -22,7 +22,8 @@ router.get('/', requireAuth, (req, res) => {
     plexTokenMasked: maskedToken,
     hasToken: Boolean(rawToken),
     plexServerName: settings?.plex_server_name || '',
-    isConfigured: Boolean(settings?.is_configured),
+    // Configured means Plex can actually be reached with what's saved (a saved password alone doesn't count)
+    isConfigured: Boolean(settings?.plex_url && rawToken),
     autoSyncIntervalMinutes: settings?.auto_sync_interval_minutes ?? 30,
     hasWebhookSecret: Boolean(settings?.webhook_secret),
   });

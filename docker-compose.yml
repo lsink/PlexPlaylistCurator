@@ -14,4 +14,8 @@ services:
     environment:
       - PORT=32500
       - DATA_DIR=/data
-      - SESSION_SECRET=plex-playlist-creator-secret-key-change-me
+      # Optional: signs login cookies. If unset, a random per-install secret is generated in the data volume.
+      # - SESSION_SECRET=<long-random-string>
+      # Optional: set to the number of reverse proxies in front of the app (e.g. 1) so login rate limiting
+      # sees real client IPs and cookies are marked Secure over HTTPS.
+      # - TRUST_PROXY=1

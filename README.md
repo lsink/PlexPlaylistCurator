@@ -88,7 +88,10 @@ services:
     environment:
       - PORT=32500
       - DATA_DIR=/data
-      - SESSION_SECRET=choose-a-strong-session-secret
+      # Optional: if unset, a random per-install secret is generated and stored in the data volume
+      # - SESSION_SECRET=<long-random-string>
+      # Optional: number of reverse proxies in front of the app (see "Reverse proxy" below)
+      # - TRUST_PROXY=1
 ```
 
 Start the container:
@@ -97,6 +100,19 @@ docker compose up -d
 ```
 
 Access the dashboard at `http://<HOST-IP>:32500`.
+
+---
+
+## 🔒 Reverse Proxy & Security Settings
+
+These environment variables are optional. For the Proxmox LXC install, add them as extra `Environment=` lines in `/etc/systemd/system/plex-playlist-creator.service`, then run `systemctl daemon-reload && systemctl restart plex-playlist-creator`.
+
+| Variable | Purpose |
+|----------|---------|
+| `TRUST_PROXY` | Set to the number of reverse proxies in front of the app (usually `1`), `loopback`, or a comma-separated list of proxy IPs/CIDRs. Without it, every visitor behind a proxy appears to come from the proxy's IP, so the login rate limit (5 failed attempts per 15 minutes) would lock everyone out together. With it, the real client IP is used, and the login cookie is marked `Secure` when the original request was HTTPS. Leave it unset when the app is reached directly. |
+| `SESSION_SECRET` | Signs login cookies. If unset, a random secret is generated on first start and saved to `session-secret` in your data directory, so it is unique to your install and survives restarts. The placeholder values from older example configs are ignored. |
+
+Logins are stored in the app's SQLite database, so you stay signed in across restarts (for up to 30 days).
 
 ---
 

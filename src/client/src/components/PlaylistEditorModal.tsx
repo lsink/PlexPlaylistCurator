@@ -43,6 +43,7 @@ export const PlaylistEditorModal: React.FC<PlaylistEditorModalProps> = ({
   const [mode, setMode] = useState<InterleaveMode>('auto_proportional');
   const [bufferSize, setBufferSize] = useState(30);
   const [unwatchedOnly, setUnwatchedOnly] = useState(true);
+  const [includeSpecials, setIncludeSpecials] = useState(false);
   const [minConsecutive, setMinConsecutive] = useState(1);
   const [maxConsecutive, setMaxConsecutive] = useState(1);
   const [enabled, setEnabled] = useState(true);
@@ -63,6 +64,7 @@ export const PlaylistEditorModal: React.FC<PlaylistEditorModalProps> = ({
         setMode(playlist.mode);
         setBufferSize(playlist.buffer_size);
         setUnwatchedOnly(playlist.unwatchedOnly);
+        setIncludeSpecials(playlist.includeSpecials ?? true);
         const minVal = playlist.minConsecutiveEpisodes || playlist.consecutiveEpisodes || 1;
         const maxVal = playlist.maxConsecutiveEpisodes || minVal;
         setMinConsecutive(minVal);
@@ -87,6 +89,7 @@ export const PlaylistEditorModal: React.FC<PlaylistEditorModalProps> = ({
         setMode('auto_proportional');
         setBufferSize(30);
         setUnwatchedOnly(true);
+        setIncludeSpecials(false);
         setMinConsecutive(1);
         setMaxConsecutive(1);
         setEnabled(true);
@@ -183,6 +186,7 @@ export const PlaylistEditorModal: React.FC<PlaylistEditorModalProps> = ({
         mode,
         bufferSize: Number(bufferSize),
         unwatchedOnly,
+        includeSpecials,
         consecutiveEpisodes: Number(minConsecutive) || 1,
         minConsecutiveEpisodes: Number(minConsecutive) || 1,
         maxConsecutiveEpisodes: Math.max(Number(minConsecutive) || 1, Number(maxConsecutive) || 1),
@@ -500,6 +504,18 @@ export const PlaylistEditorModal: React.FC<PlaylistEditorModalProps> = ({
                   />
                   <span className="text-sm font-medium text-gray-200">
                     Only include unwatched episodes
+                  </span>
+                </label>
+
+                <label className="flex items-center space-x-3 cursor-pointer select-none">
+                  <input
+                    type="checkbox"
+                    checked={includeSpecials}
+                    onChange={(e) => setIncludeSpecials(e.target.checked)}
+                    className="w-4 h-4 text-amber-500 rounded bg-[#22262b] border-[#343b42] focus:ring-amber-500 focus:ring-offset-0"
+                  />
+                  <span className="text-sm font-medium text-gray-200">
+                    Include specials (Season 0)
                   </span>
                 </label>
 

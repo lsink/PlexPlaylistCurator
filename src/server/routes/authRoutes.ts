@@ -1,4 +1,4 @@
-import { Router } from 'express';
+import { Router, Request, Response } from 'express';
 import bcrypt from 'bcryptjs';
 import db from '../db/index.js';
 
@@ -8,6 +8,26 @@ const router = Router();
 const MAX_FAILED_LOGINS = 5;
 const LOGIN_WINDOW_MS = 15 * 60 * 1000;
 const failedLogins = new Map<string, { count: number; resetAt: number }>();
+
+// Entries are only cleaned up when the same IP comes back, so sweep periodically to keep the map small
+setInterval(() => {
+  const now = Date.now();
+  for (const [ip, entry] of failedLogins) {
+    if (entry.resetAt <= now) failedLogins.delete(ip);
+  }
+}, 10 * 60 * 1000).unref();
+
+/** Start an authenticated session under a NEW session ID, so a pre-login ID can't be reused (session fixation) */
+function startAuthenticatedSession(req: Request, res: Response, body: Record<string, unknown>) {
+  (req as any).session.regenerate((err: any) => {
+    if (err) {
+      console.error('Session regenerate error:', err);
+      return res.status(500).json({ error: 'Could not start a session.' });
+    }
+    (req as any).session.isAuthenticated = true;
+    res.json(body);
+  });
+}
 
 function loginBlockedSeconds(ip: string): number {
   const entry = failedLogins.get(ip);
@@ -30,13 +50,13 @@ function recordFailedLogin(ip: string) {
 }
 
 router.get('/status', (req, res) => {
-  const settings = db.prepare('SELECT admin_password_hash, is_configured FROM settings WHERE id = 1').get() as any;
+  const settings = db.prepare('SELECT admin_password_hash, plex_url, plex_token FROM settings WHERE id = 1').get() as any;
   const hasPassword = Boolean(settings?.admin_password_hash);
   const isAuthenticated = Boolean((req as any).session?.isAuthenticated);
 
   res.json({
     hasPassword,
-    isConfigured: Boolean(settings?.is_configured),
+    isConfigured: Boolean(settings?.plex_url && settings?.plex_token),
     isAuthenticated: !hasPassword || isAuthenticated,
   });
 });
@@ -59,8 +79,7 @@ router.post('/setup', async (req, res) => {
 
   db.prepare('UPDATE settings SET admin_password_hash = ?, is_configured = 1, updated_at = CURRENT_TIMESTAMP WHERE id = 1').run(hash);
 
-  (req as any).session.isAuthenticated = true;
-  res.json({ success: true, message: 'Password configured successfully.' });
+  startAuthenticatedSession(req, res, { success: true, message: 'Password configured successfully.' });
 });
 
 // POST /change-password — requires old password
@@ -108,8 +127,7 @@ router.post('/login', async (req, res) => {
   const settings = db.prepare('SELECT admin_password_hash FROM settings WHERE id = 1').get() as any;
 
   if (!settings?.admin_password_hash) {
-    (req as any).session.isAuthenticated = true;
-    return res.json({ success: true, message: 'No password set.' });
+    return startAuthenticatedSession(req, res, { success: true, message: 'No password set.' });
   }
 
   const isValid = await bcrypt.compare(password || '', settings.admin_password_hash);
@@ -119,8 +137,7 @@ router.post('/login', async (req, res) => {
   }
 
   failedLogins.delete(ip);
-  (req as any).session.isAuthenticated = true;
-  res.json({ success: true });
+  startAuthenticatedSession(req, res, { success: true });
 });
 
 router.post('/logout', (req, res) => {

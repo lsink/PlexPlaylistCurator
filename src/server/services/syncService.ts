@@ -19,6 +19,7 @@ export interface PlaylistRecord {
   last_synced_at: string | null;
   last_sync_status: string | null;
   last_synced_queue?: string | null;
+  include_specials?: number;
   consecutive_episodes?: number;
   min_consecutive_episodes?: number;
   max_consecutive_episodes?: number;
@@ -96,6 +97,11 @@ export class SyncService {
     };
   }
 
+  /** Season 0 is Plex's "Specials"; playlists can opt out of them */
+  private static applySpecialsFilter<T extends { seasonNumber: number }>(episodes: T[], playlist: PlaylistRecord): T[] {
+    return playlist.include_specials === 0 ? episodes.filter((ep) => ep.seasonNumber !== 0) : episodes;
+  }
+
   public static getPlexService(): PlexService {
     const settings = db.prepare('SELECT * FROM settings WHERE id = 1').get() as any;
     if (!settings || !settings.plex_url || !settings.plex_token) {
@@ -166,7 +172,18 @@ export class SyncService {
           manualWeight: show.manual_weight,
         });
       } else {
-        refreshedShows.push(show);
+        // Plex couldn't be reached for this show: keep the stored values, in the same shape the client expects
+        refreshedShows.push({
+          id: show.id,
+          ratingKey: show.plex_show_rating_key,
+          title: show.show_title,
+          thumb: show.show_thumb,
+          seasonCount: show.season_count,
+          totalEpisodes: show.total_episodes,
+          unwatchedEpisodes: show.unwatched_episodes,
+          sortOrder: show.sort_order,
+          manualWeight: show.manual_weight,
+        });
       }
     }
 
@@ -209,7 +226,7 @@ export class SyncService {
       if (result.status === 'rejected') {
         throw new Error(`Failed to fetch episodes for "${show.show_title}": ${result.reason?.message || result.reason}`);
       }
-      const episodes = result.value;
+      const episodes = this.applySpecialsFilter(result.value, playlist);
 
       if (unwatchedOnly) {
         try {
@@ -325,7 +342,7 @@ export class SyncService {
         if (result.status === 'rejected') {
           throw new Error(`Failed to fetch episodes for "${show.show_title}": ${result.reason?.message || result.reason}`);
         }
-        const episodes = result.value;
+        const episodes = this.applySpecialsFilter(result.value, playlist);
 
         if (syncUnwatchedOnly) {
           try {

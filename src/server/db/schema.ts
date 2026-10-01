@@ -20,6 +20,7 @@ CREATE TABLE IF NOT EXISTS playlists (
   mode TEXT NOT NULL DEFAULT 'auto_proportional' CHECK (mode IN ('round_robin','auto_proportional','manual_weighted','chronological','runtime_balanced')),
   buffer_size INTEGER NOT NULL DEFAULT 30,
   unwatched_only INTEGER NOT NULL DEFAULT 1,
+  include_specials INTEGER NOT NULL DEFAULT 1,
   consecutive_episodes INTEGER NOT NULL DEFAULT 1,
   min_consecutive_episodes INTEGER NOT NULL DEFAULT 1,
   max_consecutive_episodes INTEGER NOT NULL DEFAULT 1,
@@ -58,7 +59,14 @@ CREATE TABLE IF NOT EXISTS sync_logs (
 );
 
 
+CREATE TABLE IF NOT EXISTS sessions (
+  sid TEXT PRIMARY KEY,
+  sess TEXT NOT NULL,
+  expires INTEGER NOT NULL
+);
+
 -- Performance indexes
+CREATE INDEX IF NOT EXISTS idx_sessions_expires ON sessions (expires);
 CREATE INDEX IF NOT EXISTS idx_playlist_shows_playlist_id ON playlist_shows (playlist_id);
 CREATE INDEX IF NOT EXISTS idx_playlist_shows_rating_key ON playlist_shows (plex_show_rating_key);
 CREATE INDEX IF NOT EXISTS idx_sync_logs_created_at ON sync_logs (created_at DESC);

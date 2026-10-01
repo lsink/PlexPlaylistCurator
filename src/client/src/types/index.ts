@@ -22,6 +22,7 @@ export interface Playlist {
   mode: InterleaveMode;
   buffer_size: number;
   unwatchedOnly: boolean;
+  includeSpecials?: boolean;
   consecutiveEpisodes?: number;
   minConsecutiveEpisodes?: number;
   maxConsecutiveEpisodes?: number;

@@ -78,7 +78,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
       const data = await api.getSettings();
       if (isCancelled()) return;
       setAppVersion(data.appVersion || '1.0.0');
-      setPlexUrl(data.plexUrl || 'http://192.168.1.100:32400');
+      setPlexUrl(data.plexUrl || '');
       setMaskedToken(data.plexTokenMasked || '');
       setHasToken(data.hasToken);
       setHasWebhookSecret(Boolean(data.hasWebhookSecret));
