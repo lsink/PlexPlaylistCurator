@@ -49,6 +49,10 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   const [error, setError] = useState<string | null>(null);
   const [copiedWebhook, setCopiedWebhook] = useState(false);
   const [settingsLoaded, setSettingsLoaded] = useState(false);
+  const [hasWebhookSecret, setHasWebhookSecret] = useState(false);
+  const [webhookSecretInput, setWebhookSecretInput] = useState('');
+  const [clearWebhookSecret, setClearWebhookSecret] = useState(false);
+  const [revealedSecret, setRevealedSecret] = useState<string | null>(null);
   const [backupMessage, setBackupMessage] = useState<{ text: string; ok: boolean } | null>(null);
   const importInputRef = useRef<HTMLInputElement>(null);
 
@@ -60,6 +64,9 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
     setSaveSuccess(false);
     setError(null);
     setBackupMessage(null);
+    setWebhookSecretInput('');
+    setClearWebhookSecret(false);
+    setRevealedSecret(null);
     loadSettings(() => cancelled);
     return () => {
       cancelled = true;
@@ -74,6 +81,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
       setPlexUrl(data.plexUrl || 'http://192.168.1.100:32400');
       setMaskedToken(data.plexTokenMasked || '');
       setHasToken(data.hasToken);
+      setHasWebhookSecret(Boolean(data.hasWebhookSecret));
       setAutoSyncInterval(data.autoSyncIntervalMinutes ?? 30);
       setSettingsLoaded(true);
     } catch (err: any) {
@@ -141,6 +149,8 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
         plexUrl,
         plexToken: plexToken.trim() ? plexToken.trim() : undefined,
         autoSyncIntervalMinutes: Number(autoSyncInterval),
+        // undefined = keep the current secret; '' = remove it
+        webhookSecret: webhookSecretInput.trim() ? webhookSecretInput.trim() : clearWebhookSecret ? '' : undefined,
       });
 
       if (newPassword.trim()) {
@@ -159,7 +169,27 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
     }
   };
 
-  const webhookUrl = `${window.location.origin}/api/webhook/plex`;
+  // The secret that will be active after saving: a newly typed one, otherwise the revealed existing one
+  const effectiveSecret = webhookSecretInput.trim() || (clearWebhookSecret ? '' : revealedSecret || '');
+  const webhookBaseUrl = `${window.location.origin}/api/webhook/plex`;
+  const webhookUrl = effectiveSecret ? `${webhookBaseUrl}?secret=${effectiveSecret}` : webhookBaseUrl;
+  const secretPending = hasWebhookSecret && !clearWebhookSecret && !webhookSecretInput.trim() && revealedSecret === null;
+
+  const generateWebhookSecret = () => {
+    const bytes = new Uint8Array(24);
+    crypto.getRandomValues(bytes);
+    setWebhookSecretInput(Array.from(bytes, (b) => b.toString(16).padStart(2, '0')).join(''));
+    setClearWebhookSecret(false);
+  };
+
+  const revealWebhookSecret = async () => {
+    try {
+      const res = await api.getWebhookSecret();
+      setRevealedSecret(res.secret);
+    } catch (err: any) {
+      setError(err.message || 'Failed to load webhook secret');
+    }
+  };
 
   const copyToClipboard = async (text: string) => {
     let copied = false;
@@ -415,6 +445,65 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                   </>
                 )}
               </button>
+            </div>
+
+            {secretPending && (
+              <p className="text-[11px] text-amber-300/90">
+                A secret is set, so Plex needs the URL with <code className="font-mono">?secret=…</code>.{' '}
+                <button type="button" onClick={revealWebhookSecret} className="underline hover:text-amber-200 cursor-pointer">
+                  Reveal it to copy the full URL
+                </button>
+              </p>
+            )}
+
+            <div>
+              <label htmlFor="webhook-secret" className="block text-xs font-semibold text-gray-300 mb-1">
+                Webhook secret (optional)
+              </label>
+              <div className="flex items-center space-x-2">
+                <input
+                  id="webhook-secret"
+                  type="text"
+                  value={webhookSecretInput}
+                  onChange={(e) => {
+                    setWebhookSecretInput(e.target.value);
+                    setClearWebhookSecret(false);
+                  }}
+                  placeholder={
+                    clearWebhookSecret
+                      ? 'Secret will be removed on save'
+                      : hasWebhookSecret
+                      ? 'A secret is set — type or generate to replace it'
+                      : 'None — anyone on your network can trigger syncs'
+                  }
+                  autoComplete="off"
+                  spellCheck={false}
+                  className="flex-1 bg-[#22262b] border border-[#343b42] text-white font-mono text-xs rounded-lg px-3.5 py-2 focus:outline-none focus:border-amber-500 placeholder-gray-500"
+                />
+                <button
+                  type="button"
+                  onClick={generateWebhookSecret}
+                  className="px-3 py-2 rounded-lg bg-[#252a30] hover:bg-[#343b44] border border-[#373e47] text-xs font-semibold text-gray-200 cursor-pointer shrink-0"
+                >
+                  Generate
+                </button>
+                {hasWebhookSecret && !clearWebhookSecret && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setClearWebhookSecret(true);
+                      setWebhookSecretInput('');
+                      setRevealedSecret(null);
+                    }}
+                    className="px-3 py-2 rounded-lg bg-red-500/10 hover:bg-red-500/20 border border-red-500/30 text-xs font-semibold text-red-400 cursor-pointer shrink-0"
+                  >
+                    Remove
+                  </button>
+                )}
+              </div>
+              <p className="text-[11px] text-gray-500 mt-1">
+                8–128 letters, numbers, <code className="font-mono">-</code> or <code className="font-mono">_</code>. Save, then paste the URL above (with <code className="font-mono">?secret=</code>) into Plex.
+              </p>
             </div>
           </div>
 

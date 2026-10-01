@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { X, History, Trash2, CheckCircle2, AlertCircle, RefreshCw, Loader2 } from 'lucide-react';
 import { SyncLog } from '../types';
 import { api } from '../api/client';
+import { parseDbTimestamp } from '../utils/format';
 import { useModalA11y } from '../hooks/useModalA11y';
 import { useConfirm } from './ConfirmDialog';
 
@@ -149,7 +150,7 @@ export const SyncLogsModal: React.FC<SyncLogsModalProps> = ({
                     <tr key={log.id} className="hover:bg-[#22272d]">
                       <td className="py-2.5 px-3">{renderStatus(log.status)}</td>
                       <td className="py-2.5 px-3 font-mono text-gray-400 whitespace-nowrap">
-                        {new Date(log.created_at).toLocaleString()}
+                        {parseDbTimestamp(log.created_at).toLocaleString()}
                       </td>
                       <td className="py-2.5 px-3 font-medium text-white">
                         {log.playlist_name || 'All'}

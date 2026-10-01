@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { GitCompare, ChevronDown, ChevronRight, ArrowUpRight, ArrowDownLeft } from 'lucide-react';
 import { SyncDiff } from '../types';
+import { parseDbTimestamp } from '../utils/format';
 
 interface QueueDiffPanelProps {
   diff: SyncDiff;
@@ -12,7 +13,7 @@ const episodeCode = (season: number, episode: number) =>
 export const QueueDiffPanel: React.FC<QueueDiffPanelProps> = ({ diff }) => {
   const [expanded, setExpanded] = useState(false);
 
-  const lastSynced = diff.lastSyncedAt ? new Date(diff.lastSyncedAt.replace(' ', 'T') + 'Z').toLocaleString() : null;
+  const lastSynced = diff.lastSyncedAt ? parseDbTimestamp(diff.lastSyncedAt).toLocaleString() : null;
 
   if (!diff.hasBaseline) {
     return (

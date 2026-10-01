@@ -59,6 +59,22 @@ export class PlexService {
         'X-Plex-Device-Name': 'Playlist Creator Service',
       },
     });
+
+    // Axios errors carry the full request config and headers (including X-Plex-Token). Rethrow a plain
+    // error so the token can never leak through console.error(err), stack traces or error serialization.
+    this.client.interceptors.response.use(
+      (response) => response,
+      (err) => {
+        if (axios.isAxiosError(err)) {
+          const clean = new Error(err.message) as Error & { status?: number; code?: string };
+          clean.name = 'PlexRequestError';
+          clean.status = err.response?.status;
+          clean.code = err.code;
+          return Promise.reject(clean);
+        }
+        return Promise.reject(err);
+      }
+    );
   }
 
   public getBaseUrl(): string {

@@ -1,30 +1,47 @@
-import { Router } from 'express';
+import { Router, Request, Response, NextFunction } from 'express';
+import multer from 'multer';
 import { timingSafeEqual } from 'crypto';
 import { SyncService } from '../services/syncService.js';
 import db from '../db/index.js';
 
 const router = Router();
 
-router.post('/plex', async (req, res) => {
-  try {
-    // Optional webhook secret validation — check BEFORE parsing payload
-    const settings = db.prepare('SELECT webhook_secret FROM settings WHERE id = 1').get() as any;
-    if (settings?.webhook_secret) {
-      // Plex webhooks can't send custom headers, so also accept ?secret= in the URL
-      const secretHeader = String(req.headers['x-webhook-secret'] || req.query.secret || '');
-      let valid = false;
-      try {
-        const a = Buffer.from(secretHeader);
-        const b = Buffer.from(settings.webhook_secret);
-        valid = a.length === b.length && timingSafeEqual(a, b);
-      } catch {
-        valid = false;
-      }
-      if (!valid) {
-        return res.status(401).json({ error: 'Invalid webhook secret' });
-      }
-    }
+// Plex sends webhooks as multipart/form-data (a "payload" JSON field, plus an optional thumbnail file).
+// Memory storage with tight limits: the thumbnail is never used, so it is simply discarded.
+const multipartParser = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 2 * 1024 * 1024, files: 2, fields: 10, parts: 12 },
+}).any();
 
+/** Reject bad secrets BEFORE parsing the body, so unauthenticated callers can't make us buffer uploads */
+function checkWebhookSecret(req: Request, res: Response, next: NextFunction) {
+  const settings = db.prepare('SELECT webhook_secret FROM settings WHERE id = 1').get() as any;
+  if (!settings?.webhook_secret) return next();
+
+  // Plex webhooks can't send custom headers, so also accept ?secret= in the URL
+  const provided = String(req.headers['x-webhook-secret'] || req.query.secret || '');
+  const a = Buffer.from(provided);
+  const b = Buffer.from(settings.webhook_secret);
+  const valid = a.length === b.length && timingSafeEqual(a, b);
+  if (!valid) {
+    return res.status(401).json({ error: 'Invalid webhook secret' });
+  }
+  next();
+}
+
+function parseMultipartIfNeeded(req: Request, res: Response, next: NextFunction) {
+  if (!req.is('multipart/form-data')) return next();
+  multipartParser(req, res, (err: any) => {
+    if (err) {
+      console.error('Failed to parse multipart webhook:', err?.message || err);
+      return res.status(400).json({ error: 'Invalid multipart payload' });
+    }
+    next();
+  });
+}
+
+router.post('/plex', checkWebhookSecret, parseMultipartIfNeeded, async (req, res) => {
+  try {
     let payload = req.body;
 
     // If Plex sent multipart or URL encoded with a 'payload' JSON string

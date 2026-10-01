@@ -28,6 +28,12 @@ router.get('/', requireAuth, (req, res) => {
   });
 });
 
+// Reveal the webhook secret on demand (authenticated) so the UI can build the full webhook URL
+router.get('/webhook-secret', requireAuth, (req, res) => {
+  const row = db.prepare('SELECT webhook_secret FROM settings WHERE id = 1').get() as any;
+  res.json({ secret: row?.webhook_secret || '' });
+});
+
 // Update settings
 router.post('/', requireAuth, async (req, res) => {
   const { plexUrl, plexToken, autoSyncIntervalMinutes, webhookSecret } = req.body;
@@ -45,6 +51,11 @@ router.post('/', requireAuth, async (req, res) => {
     } catch {
       // Allow saving even if offline, but don't fail completely
     }
+  }
+
+  // The secret travels in a URL query string (Plex can't send headers), so keep it URL-safe
+  if (typeof webhookSecret === 'string' && webhookSecret !== '' && !/^[A-Za-z0-9_-]{8,128}$/.test(webhookSecret)) {
+    return res.status(400).json({ error: 'Webhook secret must be 8-128 characters: letters, numbers, - and _ only.' });
   }
 
   const interval = typeof autoSyncIntervalMinutes === 'number' ? autoSyncIntervalMinutes : 30;

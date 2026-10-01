@@ -44,7 +44,8 @@ export const api = {
 
   // Settings
   getSettings: () => request<SettingsData>('/api/settings'),
-  saveSettings: (data: Partial<SettingsData> & { plexToken?: string }) => request<{ success: boolean; serverName: string }>('/api/settings', {
+  getWebhookSecret: () => request<{ secret: string }>('/api/settings/webhook-secret'),
+  saveSettings: (data: Partial<SettingsData> & { plexToken?: string; webhookSecret?: string }) => request<{ success: boolean; serverName: string }>('/api/settings', {
     method: 'POST',
     body: JSON.stringify(data),
   }),

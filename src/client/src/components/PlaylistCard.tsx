@@ -14,7 +14,7 @@ import {
   AlertCircle,
 } from 'lucide-react';
 import { Playlist, InterleaveMode } from '../types';
-import { getPosterUrl } from '../utils/format';
+import { getPosterUrl, parseDbTimestamp } from '../utils/format';
 
 interface PlaylistCardProps {
   playlist: Playlist;
@@ -210,7 +210,7 @@ const PlaylistCardComponent: React.FC<PlaylistCardProps> = ({
           )}
           <span>
             {playlist.last_synced_at
-              ? `Synced ${new Date(playlist.last_synced_at).toLocaleDateString()} ${new Date(
+              ? `Synced ${parseDbTimestamp(playlist.last_synced_at).toLocaleDateString()} ${parseDbTimestamp(
                   playlist.last_synced_at
                 ).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`
               : 'Never synced'}

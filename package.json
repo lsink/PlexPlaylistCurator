@@ -1,6 +1,6 @@
 {
   "name": "plex-playlist-creator",
-  "version": "1.4.6",
+  "version": "1.4.7",
   "description": "Production-ready automated interleaved TV show playlist manager for Plex Media Server",
   "type": "module",
   "main": "dist/server/index.js",
@@ -29,6 +29,7 @@
     "express": "^4.21.2",
     "express-session": "^1.18.1",
     "lucide-react": "^1.16.0",
+    "multer": "^2.4.0",
     "zod": "^3.24.2"
   },
   "devDependencies": {
@@ -38,6 +39,7 @@
     "@types/cors": "^2.8.17",
     "@types/express": "^5.0.0",
     "@types/express-session": "^1.18.1",
+    "@types/multer": "^2.3.0",
     "@types/node": "^22.13.5",
     "@types/react": "^19.0.10",
     "@types/react-dom": "^19.0.4",
