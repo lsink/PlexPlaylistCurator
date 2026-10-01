@@ -1,6 +1,6 @@
 {
   "name": "plex-playlist-creator",
-  "version": "1.4.7",
+  "version": "1.4.8",
   "description": "Production-ready automated interleaved TV show playlist manager for Plex Media Server",
   "type": "module",
   "main": "dist/server/index.js",

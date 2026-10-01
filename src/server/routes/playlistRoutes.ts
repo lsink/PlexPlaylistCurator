@@ -6,6 +6,13 @@ import { requireAuth } from '../middleware/auth.js';
 
 const router = Router();
 
+/** Another app playlist already syncs to a Plex playlist with this title (case-insensitive)? */
+function findTitleConflict(title: string, excludeId?: string): { name: string } | undefined {
+  return db
+    .prepare('SELECT name FROM playlists WHERE LOWER(plex_playlist_title) = LOWER(?) AND id != ?')
+    .get(title, excludeId ?? '') as { name: string } | undefined;
+}
+
 const VALID_MODES = ['round_robin', 'auto_proportional', 'manual_weighted', 'chronological', 'runtime_balanced'];
 
 /** Shared by create and update: replace playlist_shows with a diff so existing rows keep their IDs */
@@ -146,13 +153,17 @@ router.post('/import', requireAuth, (req, res) => {
       const min = typeof p.minConsecutiveEpisodes === 'number' && p.minConsecutiveEpisodes > 0 ? p.minConsecutiveEpisodes : 1;
       const max = typeof p.maxConsecutiveEpisodes === 'number' && p.maxConsecutiveEpisodes >= min ? p.maxConsecutiveEpisodes : min;
       const id = randomUUID();
+      // Keep Plex titles unique: restoring onto an install that already has this playlist adds " (2)", " (3)", ...
+      const baseTitle = (p.plexPlaylistTitle || p.name).trim();
+      let importTitle = baseTitle;
+      for (let n = 2; findTitleConflict(importTitle); n++) importTitle = `${baseTitle} (${n})`;
       db.prepare(
         `INSERT INTO playlists (id, name, plex_playlist_title, mode, buffer_size, unwatched_only, consecutive_episodes, min_consecutive_episodes, max_consecutive_episodes, enabled)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
       ).run(
         id,
         p.name.trim(),
-        (p.plexPlaylistTitle || p.name).trim(),
+        importTitle,
         mode,
         typeof p.bufferSize === 'number' ? p.bufferSize : 30,
         p.unwatchedOnly === false ? 0 : 1,
@@ -233,6 +244,13 @@ router.post('/', requireAuth, async (req, res) => {
 
   const playlistId = randomUUID();
   const title = plexPlaylistTitle?.trim() || name.trim();
+
+  const conflict = findTitleConflict(title);
+  if (conflict) {
+    return res.status(409).json({
+      error: `The playlist "${conflict.name}" already uses the Plex title "${title}". Each playlist needs its own Plex title.`,
+    });
+  }
   const selectedMode = mode || 'auto_proportional';
   const buffer = typeof bufferSize === 'number' ? bufferSize : 30;
   const isUnwatchedOnly = unwatchedOnly !== false ? 1 : 0;
@@ -285,6 +303,16 @@ router.put('/:id', requireAuth, async (req, res) => {
   }
   if (mode !== undefined && !VALID_MODES.includes(mode)) {
     return res.status(400).json({ error: `Invalid mode. Must be one of: ${VALID_MODES.join(', ')}` });
+  }
+
+  const newTitle = plexPlaylistTitle?.trim();
+  if (newTitle) {
+    const conflict = findTitleConflict(newTitle, playlistId);
+    if (conflict) {
+      return res.status(409).json({
+        error: `The playlist "${conflict.name}" already uses the Plex title "${newTitle}". Each playlist needs its own Plex title.`,
+      });
+    }
   }
 
   const minConsecutive = typeof minConsecutiveEpisodes === 'number' && minConsecutiveEpisodes > 0

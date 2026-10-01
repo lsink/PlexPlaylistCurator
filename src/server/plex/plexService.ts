@@ -344,6 +344,23 @@ export class PlexService {
 
     const machineId = await this.getMachineIdentifier();
 
+    // First sync (no stored Plex ID): a same-titled playlist is not ours. It may be one the user made by hand,
+    // so refuse rather than delete it. Once we have created a playlist we track it by ID and never touch others.
+    if (!existingPlexPlaylistId) {
+      let clash: any;
+      try {
+        clash = (await this.getPlaylists()).find((p: any) => p.title === playlistTitle);
+      } catch {
+        // Can't list playlists; proceed (worst case Plex ends up with two same-titled playlists)
+      }
+      if (clash) {
+        throw new Error(
+          `A Plex playlist named "${playlistTitle}" already exists and isn't managed by this app. ` +
+            `Rename or delete it in Plex, or change this playlist's Plex title, then sync again.`
+        );
+      }
+    }
+
     // Step 1: Create playlist with first item
     const firstKey = episodeRatingKeys[0];
     const firstUri = `server://${machineId}/com.plexapp.plugins.library/library/metadata/${firstKey}`;
@@ -397,20 +414,10 @@ export class PlexService {
         }
       }
 
-      // Step 3: Only now remove the old playlist(s), so a failure above never loses the original
-      const staleKeys = new Set<string>();
-      if (existingPlexPlaylistId) staleKeys.add(existingPlexPlaylistId);
-      try {
-        const existingList = await this.getPlaylists();
-        for (const p of existingList) {
-          if (p.title === playlistTitle) staleKeys.add(String(p.ratingKey));
-        }
-      } catch {
-        // Ignore error
-      }
-      staleKeys.delete(newPlaylistRatingKey);
-      for (const key of staleKeys) {
-        await this.deletePlaylist(key);
+      // Step 3: Only now remove the previous playlist that this app created, so a failure above never loses it.
+      // Deliberately by stored ID only, never by title: that could delete playlists that aren't ours.
+      if (existingPlexPlaylistId && existingPlexPlaylistId !== newPlaylistRatingKey) {
+        await this.deletePlaylist(existingPlexPlaylistId);
       }
     } catch (err) {
       // Roll back the partial replacement; the original playlist is untouched
