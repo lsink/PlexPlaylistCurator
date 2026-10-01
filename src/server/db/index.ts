@@ -51,6 +51,10 @@ try {
   db.exec("ALTER TABLE settings ADD COLUMN plex_client_id TEXT NOT NULL DEFAULT ''");
 } catch {}
 
+try {
+  db.exec('ALTER TABLE playlists ADD COLUMN last_synced_queue TEXT');
+} catch {}
+
 // Note: SQLite does not support ALTER COLUMN to change type.
 // manual_weight column stores REAL values correctly even if schema shows INTEGER (SQLite is type-flexible).
 // New databases will use the REAL type declared in the schema above.

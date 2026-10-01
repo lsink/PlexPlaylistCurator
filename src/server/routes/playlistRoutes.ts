@@ -70,7 +70,7 @@ router.get('/', requireAuth, (req, res) => {
     else showsByPlaylist.set(s.playlist_id, [s]);
   }
 
-  const results = playlists.map((p) => ({
+  const results = playlists.map(({ last_synced_queue, ...p }) => ({
     ...p,
     unwatchedOnly: Boolean(p.unwatched_only),
     enabled: Boolean(p.enabled),
@@ -196,8 +196,9 @@ router.get('/:id', requireAuth, (req, res) => {
       manualWeight: s.manual_weight,
     }));
 
+  const { last_synced_queue, ...playlistFields } = playlist;
   res.json({
-    ...playlist,
+    ...playlistFields,
     unwatchedOnly: Boolean(playlist.unwatched_only),
     enabled: Boolean(playlist.enabled),
     consecutiveEpisodes: playlist.min_consecutive_episodes || playlist.consecutive_episodes || 1,

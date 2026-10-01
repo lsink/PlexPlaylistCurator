@@ -1,27 +1,23 @@
 import React from 'react';
 import { Play, Settings, History, Plus, RefreshCw, Shield, LogOut } from 'lucide-react';
-import { SettingsData } from '../types';
+import { useSettings } from '../context/SettingsContext';
 
 interface NavbarProps {
-  settings: SettingsData | null;
   onOpenSettings: () => void;
   onOpenLogs: () => void;
   onNewPlaylist: () => void;
   onLogout: () => void;
   hasPassword?: boolean;
-  /** null = not checked yet */
-  plexConnected?: boolean | null;
 }
 
 export const Navbar: React.FC<NavbarProps> = ({
-  settings,
   onOpenSettings,
   onOpenLogs,
   onNewPlaylist,
   onLogout,
   hasPassword,
-  plexConnected = null,
 }) => {
+  const { settings, plexConnected } = useSettings();
   return (
     <header className="bg-[#181a1d] border-b border-[#2d3238] sticky top-0 z-30 shadow-md">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">

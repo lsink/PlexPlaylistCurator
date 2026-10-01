@@ -26,6 +26,7 @@ CREATE TABLE IF NOT EXISTS playlists (
   enabled INTEGER NOT NULL DEFAULT 1,
   last_synced_at TEXT,
   last_sync_status TEXT,
+  last_synced_queue TEXT,
   created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );

@@ -1,7 +1,9 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { X, RefreshCw, Layers, Calendar, Clock, Film, AlertCircle } from 'lucide-react';
 import { Playlist, PreviewData } from '../types';
 import { api } from '../api/client';
+import { VirtualList } from './VirtualList';
+import { QueueDiffPanel } from './QueueDiffPanel';
 import { useModalA11y } from '../hooks/useModalA11y';
 import { getPosterUrl, formatDuration } from '../utils/format';
 
@@ -24,6 +26,7 @@ export const QueuePreviewModal: React.FC<QueuePreviewModalProps> = ({
   const [error, setError] = useState<string | null>(null);
   const [isSyncing, setIsSyncing] = useState(false);
   const requestIdRef = useRef(0);
+  const addedKeys = useMemo(() => new Set(preview?.diff?.added ?? []), [preview]);
 
   useEffect(() => {
     if (isOpen && playlist) {
@@ -125,6 +128,8 @@ export const QueuePreviewModal: React.FC<QueuePreviewModalProps> = ({
             </div>
           ) : (
             <>
+              {preview.diff && <QueueDiffPanel diff={preview.diff} />}
+
               {/* Show Distribution Stats */}
               {preview.showStats && preview.showStats.length > 0 && (
                 <div className="bg-[#16181b] border border-[#2d3238] rounded-xl p-4">
@@ -178,12 +183,16 @@ export const QueuePreviewModal: React.FC<QueuePreviewModalProps> = ({
                 <h4 className="text-xs font-semibold uppercase tracking-wider text-gray-400">
                   Upcoming Episode Sequence
                 </h4>
-                {preview.episodes.map((ep, idx) => {
+                <VirtualList
+                  items={preview.episodes}
+                  itemHeight={56}
+                  gap={8}
+                  ariaLabel="Upcoming episode sequence"
+                  renderItem={(ep, idx) => {
                   const posterUrl = getPosterUrl(ep.thumb);
                   return (
                     <div
-                      key={`${ep.ratingKey}-${idx}`}
-                      className="flex items-center space-x-3 bg-[#1d2125] border border-[#2d3238] hover:border-[#3d454f] rounded-xl p-2.5 transition-colors"
+                      className="h-full overflow-hidden flex items-center space-x-3 bg-[#1d2125] border border-[#2d3238] hover:border-[#3d454f] rounded-xl p-2.5 transition-colors"
                     >
                       {/* Queue sequence index */}
                       <span className="w-7 text-center font-mono text-xs font-bold text-gray-500 shrink-0">
@@ -215,6 +224,11 @@ export const QueuePreviewModal: React.FC<QueuePreviewModalProps> = ({
                           <span className="text-xs font-mono font-medium text-gray-400 bg-[#252a30] px-1.5 py-0.5 rounded">
                             S{String(ep.seasonNumber).padStart(2, '0')}E{String(ep.episodeNumber).padStart(2, '0')}
                           </span>
+                          {addedKeys.has(ep.ratingKey) && (
+                            <span className="text-[10px] font-bold uppercase tracking-wide text-emerald-400 bg-emerald-500/10 border border-emerald-500/30 px-1.5 py-0.5 rounded">
+                              New
+                            </span>
+                          )}
                         </div>
                         <p className="text-xs text-gray-300 truncate mt-0.5">{ep.title}</p>
                       </div>
@@ -236,7 +250,8 @@ export const QueuePreviewModal: React.FC<QueuePreviewModalProps> = ({
                       </div>
                     </div>
                   );
-                })}
+                  }}
+                />
               </div>
             </>
           )}

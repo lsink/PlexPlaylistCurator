@@ -18,6 +18,7 @@ export interface PlaylistRecord {
   enabled: number;
   last_synced_at: string | null;
   last_sync_status: string | null;
+  last_synced_queue?: string | null;
   consecutive_episodes?: number;
   min_consecutive_episodes?: number;
   max_consecutive_episodes?: number;
@@ -54,6 +55,45 @@ export class SyncService {
     } catch (err) {
       console.error('Failed to prune sync logs:', err);
     }
+  }
+
+  /** Minimal episode shape stored as the "last synced" baseline for the preview diff view */
+  private static toSnapshot(queue: { ratingKey: string; showRatingKey: string; showTitle: string; seasonNumber: number; episodeNumber: number; title: string }[]) {
+    return queue.map((ep) => ({
+      ratingKey: ep.ratingKey,
+      showRatingKey: ep.showRatingKey,
+      showTitle: ep.showTitle,
+      seasonNumber: ep.seasonNumber,
+      episodeNumber: ep.episodeNumber,
+      title: ep.title,
+    }));
+  }
+
+  /** Compare the freshly calculated queue against what was last pushed to Plex */
+  private static buildQueueDiff(playlist: PlaylistRecord, queue: { ratingKey: string; showTitle: string }[]) {
+    let baseline: { ratingKey: string; showRatingKey?: string; showTitle: string; seasonNumber: number; episodeNumber: number; title: string }[] | null = null;
+    if (playlist.last_synced_queue) {
+      try {
+        baseline = JSON.parse(playlist.last_synced_queue);
+      } catch {
+        baseline = null;
+      }
+    }
+    if (!baseline) {
+      return { hasBaseline: false, lastSyncedAt: playlist.last_synced_at, removed: [], added: [], unchanged: 0 };
+    }
+
+    const newKeys = new Set(queue.map((ep) => ep.ratingKey));
+    const oldKeys = new Set(baseline.map((ep) => ep.ratingKey));
+    const removed = baseline.filter((ep) => !newKeys.has(ep.ratingKey));
+    const added = queue.filter((ep) => !oldKeys.has(ep.ratingKey)).map((ep) => ep.ratingKey);
+    return {
+      hasBaseline: true,
+      lastSyncedAt: playlist.last_synced_at,
+      removed,
+      added,
+      unchanged: baseline.length - removed.length,
+    };
   }
 
   public static getPlexService(): PlexService {
@@ -207,6 +247,7 @@ export class SyncService {
       episodes: queue,
       showStats,
       totalEpisodesInQueue: queue.length,
+      diff: this.buildQueueDiff(playlist, queue),
     };
   }
 
@@ -325,9 +366,10 @@ export class SyncService {
           plex_playlist_id = ?, 
           last_synced_at = CURRENT_TIMESTAMP, 
           last_sync_status = 'success',
+          last_synced_queue = ?,
           updated_at = CURRENT_TIMESTAMP 
         WHERE id = ?`
-      ).run(result.plexPlaylistId, playlist.id);
+      ).run(result.plexPlaylistId, JSON.stringify(this.toSnapshot(queue)), playlist.id);
 
       // Log success
       db.prepare(

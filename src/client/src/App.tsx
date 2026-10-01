@@ -20,10 +20,11 @@ import { LoginModal } from './components/LoginModal';
 import { Playlist, SettingsData } from './types';
 import { api } from './api/client';
 import { useConfirm } from './components/ConfirmDialog';
+import { useSettings } from './context/SettingsContext';
 
 export const App: React.FC = () => {
   const [playlists, setPlaylists] = useState<Playlist[]>([]);
-  const [settings, setSettings] = useState<SettingsData | null>(null);
+  const { settings, refreshSettings, clearSettings } = useSettings();
   const [authStatus, setAuthStatus] = useState<{
     hasPassword: boolean;
     isConfigured: boolean;
@@ -35,7 +36,6 @@ export const App: React.FC = () => {
   const [toastMessage, setToastMessage] = useState<{ text: string; type: 'success' | 'error' } | null>(null);
   const toastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const confirm = useConfirm();
-  const [plexConnected, setPlexConnected] = useState<boolean | null>(null);
 
   // Modals
   const [settingsOpen, setSettingsOpen] = useState(false);
@@ -70,36 +70,12 @@ export const App: React.FC = () => {
   useEffect(() => {
     const onExpired = () => {
       setAuthStatus((prev) => (prev ? { ...prev, isAuthenticated: false } : prev));
+      clearSettings();
       setLoginOpen(true);
     };
     window.addEventListener('auth-expired', onExpired);
     return () => window.removeEventListener('auth-expired', onExpired);
-  }, []);
-
-  // Plex connection health indicator
-  const plexConfigured = Boolean(settings?.isConfigured);
-  const authenticated = Boolean(authStatus?.isAuthenticated);
-  useEffect(() => {
-    if (!plexConfigured || !authenticated) {
-      setPlexConnected(null);
-      return;
-    }
-    let cancelled = false;
-    const check = async () => {
-      try {
-        const res = await api.getPlexStatus();
-        if (!cancelled) setPlexConnected(res.connected);
-      } catch {
-        if (!cancelled) setPlexConnected(false);
-      }
-    };
-    check();
-    const timer = setInterval(check, 45000);
-    return () => {
-      cancelled = true;
-      clearInterval(timer);
-    };
-  }, [plexConfigured, authenticated]);
+  }, [clearSettings]);
 
   const checkAuthAndLoad = async () => {
     try {
@@ -124,10 +100,9 @@ export const App: React.FC = () => {
   const loadInitialData = useCallback(async () => {
     try {
       const [settingsRes, playlistsRes] = await Promise.all([
-        api.getSettings(),
+        refreshSettings(),
         api.getPlaylists(),
       ]);
-      setSettings(settingsRes);
       setPlaylists(playlistsRes);
 
       // If Plex is not yet configured, automatically prompt user
@@ -141,7 +116,7 @@ export const App: React.FC = () => {
         setLoginOpen(true);
       }
     }
-  }, []);
+  }, [refreshSettings]);
 
   const handleLoginSuccess = useCallback(async () => {
     setLoginOpen(false);
@@ -152,12 +127,13 @@ export const App: React.FC = () => {
   const handleLogout = useCallback(async () => {
     try {
       await api.logout();
+      clearSettings();
       setAuthStatus((prev) => (prev ? { ...prev, isAuthenticated: false } : null));
       setLoginOpen(true);
     } catch (err) {
       console.error('Logout error:', err);
     }
-  }, []);
+  }, [clearSettings]);
 
   const handleSyncPlaylist = useCallback(async (id: string) => {
     try {
@@ -261,13 +237,11 @@ export const App: React.FC = () => {
   return (
     <div className="min-h-screen bg-[#131517] text-gray-100 flex flex-col">
       <Navbar
-        settings={settings}
         onOpenSettings={() => setSettingsOpen(true)}
         onOpenLogs={() => setLogsOpen(true)}
         onNewPlaylist={openEditorForNew}
         onLogout={handleLogout}
         hasPassword={authStatus?.hasPassword}
-        plexConnected={plexConnected}
       />
 
       {/* Toast Notification */}

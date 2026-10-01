@@ -43,6 +43,22 @@ export interface EpisodeQueueItem {
   duration?: number;
 }
 
+export interface SyncDiff {
+  hasBaseline: boolean;
+  lastSyncedAt: string | null;
+  /** Episodes in the last synced queue that are no longer in the calculated queue */
+  removed: Array<{
+    ratingKey: string;
+    showTitle: string;
+    seasonNumber: number;
+    episodeNumber: number;
+    title: string;
+  }>;
+  /** ratingKeys of episodes that are new compared to the last synced queue */
+  added: string[];
+  unchanged: number;
+}
+
 export interface PreviewData {
   episodes: EpisodeQueueItem[];
   showStats: Array<{
@@ -53,6 +69,7 @@ export interface PreviewData {
     episodeCount: number;
   }>;
   totalEpisodesInQueue: number;
+  diff?: SyncDiff;
 }
 
 export interface SettingsData {
