@@ -172,7 +172,8 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   // The secret that will be active after saving: a newly typed one, otherwise the revealed existing one
   const effectiveSecret = webhookSecretInput.trim() || (clearWebhookSecret ? '' : revealedSecret || '');
   const webhookBaseUrl = `${window.location.origin}/api/webhook/plex`;
-  const webhookUrl = effectiveSecret ? `${webhookBaseUrl}?secret=${effectiveSecret}` : webhookBaseUrl;
+  // The secret goes in the path, not a query string: Plex strips query strings from webhook URLs
+  const webhookUrl = effectiveSecret ? `${webhookBaseUrl}/${effectiveSecret}` : webhookBaseUrl;
   const secretPending = hasWebhookSecret && !clearWebhookSecret && !webhookSecretInput.trim() && revealedSecret === null;
 
   const generateWebhookSecret = () => {
@@ -449,7 +450,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
 
             {secretPending && (
               <p className="text-[11px] text-amber-300/90">
-                A secret is set, so Plex needs the URL with <code className="font-mono">?secret=…</code>.{' '}
+                A secret is set, so Plex needs the URL that ends with it (<code className="font-mono">/plex/&lt;secret&gt;</code>).{' '}
                 <button type="button" onClick={revealWebhookSecret} className="underline hover:text-amber-200 cursor-pointer">
                   Reveal it to copy the full URL
                 </button>
@@ -502,7 +503,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                 )}
               </div>
               <p className="text-[11px] text-gray-500 mt-1">
-                8–128 letters, numbers, <code className="font-mono">-</code> or <code className="font-mono">_</code>. Save, then paste the URL above (with <code className="font-mono">?secret=</code>) into Plex.
+                8–128 letters, numbers, <code className="font-mono">-</code> or <code className="font-mono">_</code>. Save, then paste the full URL above (it ends with the secret) into Plex, replacing any older webhook entry.
               </p>
             </div>
           </div>

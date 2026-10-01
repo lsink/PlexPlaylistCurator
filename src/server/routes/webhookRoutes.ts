@@ -18,9 +18,13 @@ function checkWebhookSecret(req: Request, res: Response, next: NextFunction) {
   const settings = db.prepare('SELECT webhook_secret FROM settings WHERE id = 1').get() as any;
   if (!settings?.webhook_secret) return next();
 
-  // Plex webhooks can't send custom headers, so also accept ?secret= in the URL
+  // Plex webhooks can't send custom headers, and Plex drops the query string from the URL it calls, so the
+  // secret is also accepted as the last path segment (/api/webhook/plex/<secret>). ?secret= still works
+  // for callers that preserve it.
   const headerSecret = req.headers['x-webhook-secret'];
-  const provided = String(headerSecret || req.query.secret || '');
+  const pathSecret = req.params.secret;
+  const provided = String(headerSecret || pathSecret || req.query.secret || '');
+  const via = headerSecret ? 'header' : pathSecret ? 'URL path' : 'URL query';
   const a = Buffer.from(provided);
   const b = Buffer.from(settings.webhook_secret);
   const valid = a.length === b.length && timingSafeEqual(a, b);
@@ -29,8 +33,8 @@ function checkWebhookSecret(req: Request, res: Response, next: NextFunction) {
     // Say exactly what was wrong (the log is admin-only) so a misconfigured Plex webhook can be diagnosed.
     // Only the secret's length is revealed, never its value.
     const reason = !provided
-      ? `no secret in the request (query parameters received: ${Object.keys(req.query).join(', ') || 'none'})`
-      : `secret sent via ${headerSecret ? 'header' : 'URL'} does not match (sent ${provided.length} characters, expected ${settings.webhook_secret.length})`;
+      ? `no secret in the request (no header, nothing after /plex in the path, query parameters received: ${Object.keys(req.query).join(', ') || 'none'})`
+      : `secret sent via ${via} does not match (sent ${provided.length} characters, expected ${settings.webhook_secret.length})`;
     console.warn(`[Webhook] rejected from ${from}: ${reason}`);
     SyncService.recordWebhookEvent({ outcome: 'rejected', detail: `${reason} - from ${from}` });
     return res.status(401).json({ error: 'Invalid webhook secret' });
@@ -50,7 +54,7 @@ function parseMultipartIfNeeded(req: Request, res: Response, next: NextFunction)
   });
 }
 
-router.post('/plex', checkWebhookSecret, parseMultipartIfNeeded, async (req, res) => {
+router.post(['/plex', '/plex/:secret'], checkWebhookSecret, parseMultipartIfNeeded, async (req, res) => {
   try {
     let payload = req.body;
 
@@ -79,7 +83,7 @@ router.post('/plex', checkWebhookSecret, parseMultipartIfNeeded, async (req, res
 
 // Anything other than POST (e.g. someone opening the URL in a browser to test it) gets a clear explanation
 // instead of the generic "Endpoint not found". Deliberately independent of the webhook secret.
-router.all('/plex', (req, res) => {
+router.all(['/plex', '/plex/:secret'], (req, res) => {
   res.setHeader('Allow', 'POST');
   res.status(405).json({
     error: 'Method not allowed',
