@@ -37,6 +37,8 @@ app.use(
     saveUninitialized: false,
     cookie: {
       secure: false, // Set to true if behind HTTPS reverse proxy with trust proxy
+      httpOnly: true,
+      sameSite: 'lax' as const,
       maxAge: 30 * 24 * 60 * 60 * 1000, // 30 days
     },
   })
@@ -83,6 +85,14 @@ if (staticDir) {
     res.sendFile(path.join(staticDir, 'index.html'));
   });
 }
+
+// Global error handler — catches synchronous errors from route handlers
+app.use((err: any, req: express.Request, res: express.Response, next: express.NextFunction) => {
+  console.error('[Unhandled Error]', err?.message || err);
+  if (!res.headersSent) {
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
 
 // Start Server
 app.listen(PORT, '0.0.0.0', () => {

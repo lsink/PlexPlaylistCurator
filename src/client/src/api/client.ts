@@ -17,7 +17,9 @@ async function request<T>(url: string, options?: RequestInit): Promise<T> {
     } catch {
       // Ignore parse failure
     }
-    throw new Error(errorMsg);
+    const error = new Error(errorMsg) as Error & { status?: number };
+    error.status = res.status;
+    throw error;
   }
 
   return res.json();

@@ -79,14 +79,15 @@ router.get('/shows/:ratingKey', requireAuth, async (req, res) => {
 });
 
 // Proxy image from Plex Media Server
-router.get('/image', async (req, res) => {
+router.get('/image', requireAuth, async (req, res) => {
   const imagePath = req.query.path as string;
   if (!imagePath) {
     return res.status(400).send('Image path is required');
   }
 
   // Security: only allow relative Plex paths starting with /
-  if (!imagePath.startsWith('/') || imagePath.startsWith('//') || imagePath.includes('://')) {
+  // Block absolute URLs, protocol-relative URLs, and path traversal
+  if (!imagePath.startsWith('/') || imagePath.startsWith('//') || imagePath.includes('://') || imagePath.includes('..')) {
     return res.status(400).send('Invalid image path');
   }
 

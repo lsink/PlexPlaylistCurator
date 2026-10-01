@@ -24,7 +24,7 @@ router.get('/', requireAuth, (req, res) => {
     plexServerName: settings?.plex_server_name || '',
     isConfigured: Boolean(settings?.is_configured),
     autoSyncIntervalMinutes: settings?.auto_sync_interval_minutes ?? 30,
-    webhookSecret: settings?.webhook_secret || '',
+    hasWebhookSecret: Boolean(settings?.webhook_secret),
   });
 });
 
@@ -59,7 +59,7 @@ router.post('/', requireAuth, async (req, res) => {
       webhook_secret = COALESCE(?, webhook_secret),
       updated_at = CURRENT_TIMESTAMP 
     WHERE id = 1`
-  ).run(plexUrl?.trim() || '', finalToken, serverName, interval, webhookSecret || '');
+  ).run(plexUrl?.trim() || '', finalToken, serverName, interval, typeof webhookSecret === 'string' ? webhookSecret : null);
 
   // Update background cron
   updateSyncSchedule(interval);

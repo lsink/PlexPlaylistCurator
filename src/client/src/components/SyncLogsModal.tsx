@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { X, History, Trash2, CheckCircle2, AlertCircle, RefreshCw } from 'lucide-react';
+import { X, History, Trash2, CheckCircle2, AlertCircle, RefreshCw, Loader2 } from 'lucide-react';
 import { SyncLog } from '../types';
 import { api } from '../api/client';
 
@@ -14,6 +14,7 @@ export const SyncLogsModal: React.FC<SyncLogsModalProps> = ({
 }) => {
   const [logs, setLogs] = useState<SyncLog[]>([]);
   const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     if (isOpen) {
@@ -24,10 +25,12 @@ export const SyncLogsModal: React.FC<SyncLogsModalProps> = ({
   const loadLogs = async () => {
     try {
       setLoading(true);
+      setError(null);
       const data = await api.getLogs();
       setLogs(data);
-    } catch (err) {
+    } catch (err: any) {
       console.error('Failed to load logs:', err);
+      setError(err.message || 'Failed to load sync logs');
     } finally {
       setLoading(false);
     }
@@ -38,9 +41,35 @@ export const SyncLogsModal: React.FC<SyncLogsModalProps> = ({
     try {
       await api.clearLogs();
       setLogs([]);
-    } catch (err) {
+    } catch (err: any) {
       console.error('Failed to clear logs:', err);
+      setError(err.message || 'Failed to clear logs');
     }
+  };
+
+  const renderStatus = (status: string) => {
+    if (status === 'success') {
+      return (
+        <span className="inline-flex items-center gap-1 text-emerald-400 font-medium">
+          <CheckCircle2 className="w-3.5 h-3.5" />
+          Success
+        </span>
+      );
+    }
+    if (status === 'running') {
+      return (
+        <span className="inline-flex items-center gap-1 text-amber-400 font-medium">
+          <Loader2 className="w-3.5 h-3.5 animate-spin" />
+          Running
+        </span>
+      );
+    }
+    return (
+      <span className="inline-flex items-center gap-1 text-red-400 font-medium">
+        <AlertCircle className="w-3.5 h-3.5" />
+        Error
+      </span>
+    );
   };
 
   if (!isOpen) return null;
@@ -52,7 +81,7 @@ export const SyncLogsModal: React.FC<SyncLogsModalProps> = ({
         <div className="px-6 py-4 border-b border-[#2e343b] flex items-center justify-between">
           <div className="flex items-center space-x-2">
             <History className="w-5 h-5 text-amber-500" />
-            <h2 className="text-lg font-bold text-white">Sync History & Audit Logs</h2>
+            <h2 className="text-lg font-bold text-white">Sync History &amp; Audit Logs</h2>
           </div>
           <button
             onClick={onClose}
@@ -64,19 +93,25 @@ export const SyncLogsModal: React.FC<SyncLogsModalProps> = ({
 
         {/* Log table */}
         <div className="flex-1 overflow-y-auto p-4 sm:p-6">
+          {error && (
+            <div className="mb-4 p-3 rounded-xl bg-red-500/10 border border-red-500/30 flex items-center gap-2 text-red-400 text-sm">
+              <AlertCircle className="w-4 h-4 shrink-0" />
+              <span>{error}</span>
+            </div>
+          )}
           {loading ? (
             <div className="h-64 flex flex-col items-center justify-center space-y-3 text-gray-400">
               <div className="w-8 h-8 border-2 border-amber-500 border-t-transparent rounded-full animate-spin"></div>
               <p className="text-sm">Loading logs...</p>
             </div>
-          ) : logs.length === 0 ? (
+          ) : logs.length === 0 && !error ? (
             <div className="h-64 flex flex-col items-center justify-center text-gray-500">
               <History className="w-12 h-12 mb-2 opacity-30" />
               <p className="text-sm">No sync logs recorded yet.</p>
             </div>
           ) : (
             <div className="overflow-x-auto">
-              <table className="w-full text-left text-xs text-gray-300">
+              <table className="w-full text-left text-xs text-gray-300" aria-label="Sync history logs">
                 <thead className="bg-[#16181b] uppercase text-[10px] tracking-wider text-gray-400 font-semibold border-b border-[#2d3238]">
                   <tr>
                     <th className="py-2.5 px-3">Status</th>
@@ -90,19 +125,7 @@ export const SyncLogsModal: React.FC<SyncLogsModalProps> = ({
                 <tbody className="divide-y divide-[#262b30]">
                   {logs.map((log) => (
                     <tr key={log.id} className="hover:bg-[#22272d]">
-                      <td className="py-2.5 px-3">
-                        {log.status === 'success' ? (
-                          <span className="inline-flex items-center gap-1 text-emerald-400 font-medium">
-                            <CheckCircle2 className="w-3.5 h-3.5" />
-                            Success
-                          </span>
-                        ) : (
-                          <span className="inline-flex items-center gap-1 text-red-400 font-medium">
-                            <AlertCircle className="w-3.5 h-3.5" />
-                            Error
-                          </span>
-                        )}
-                      </td>
+                      <td className="py-2.5 px-3">{renderStatus(log.status)}</td>
                       <td className="py-2.5 px-3 font-mono text-gray-400 whitespace-nowrap">
                         {new Date(log.created_at).toLocaleString()}
                       </td>

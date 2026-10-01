@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
   Plus,
   RefreshCw,
@@ -32,6 +32,7 @@ export const App: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [syncingAll, setSyncingAll] = useState(false);
   const [toastMessage, setToastMessage] = useState<{ text: string; type: 'success' | 'error' } | null>(null);
+  const toastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Modals
   const [settingsOpen, setSettingsOpen] = useState(false);
@@ -42,13 +43,24 @@ export const App: React.FC = () => {
 
   const [activePlaylist, setActivePlaylist] = useState<Playlist | null>(null);
 
-  const showToast = (text: string, type: 'success' | 'error' = 'success') => {
+  const showToast = useCallback((text: string, type: 'success' | 'error' = 'success') => {
+    // Cancel any existing toast timer
+    if (toastTimerRef.current) {
+      clearTimeout(toastTimerRef.current);
+    }
     setToastMessage({ text, type });
-    setTimeout(() => setToastMessage(null), 4000);
-  };
+    toastTimerRef.current = setTimeout(() => {
+      setToastMessage(null);
+      toastTimerRef.current = null;
+    }, 4000);
+  }, []);
 
   useEffect(() => {
     checkAuthAndLoad();
+    // Clear toast timer on unmount
+    return () => {
+      if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
+    };
   }, []);
 
   const checkAuthAndLoad = async () => {
@@ -71,7 +83,7 @@ export const App: React.FC = () => {
     }
   };
 
-  const loadInitialData = async () => {
+  const loadInitialData = useCallback(async () => {
     try {
       const [settingsRes, playlistsRes] = await Promise.all([
         api.getSettings(),
@@ -86,16 +98,20 @@ export const App: React.FC = () => {
       }
     } catch (err: any) {
       console.error('Failed to load initial data:', err);
+      // If session expired (401), re-prompt login
+      if (err?.status === 401) {
+        setLoginOpen(true);
+      }
     }
-  };
+  }, []);
 
-  const handleLoginSuccess = async () => {
+  const handleLoginSuccess = useCallback(async () => {
     setLoginOpen(false);
     setAuthStatus((prev) => (prev ? { ...prev, isAuthenticated: true } : null));
     await loadInitialData();
-  };
+  }, [loadInitialData]);
 
-  const handleLogout = async () => {
+  const handleLogout = useCallback(async () => {
     try {
       await api.logout();
       setAuthStatus((prev) => (prev ? { ...prev, isAuthenticated: false } : null));
@@ -103,9 +119,9 @@ export const App: React.FC = () => {
     } catch (err) {
       console.error('Logout error:', err);
     }
-  };
+  }, []);
 
-  const handleSyncPlaylist = async (id: string) => {
+  const handleSyncPlaylist = useCallback(async (id: string) => {
     try {
       const res = await api.syncPlaylist(id);
       showToast(`Successfully synced ${res.episodesSynced} episodes to Plex!`);
@@ -115,31 +131,33 @@ export const App: React.FC = () => {
     } catch (err: any) {
       showToast(err.message || 'Sync failed', 'error');
     }
-  };
+  }, [showToast]);
 
-  const handleSyncAll = async () => {
+  const handleSyncAll = useCallback(async () => {
     setSyncingAll(true);
     try {
-      let total = 0;
-      for (const p of playlists) {
-        if (p.enabled) {
-          try {
-            const res = await api.syncPlaylist(p.id);
-            total += res.episodesSynced;
-          } catch (e) {
-            console.error(`Error syncing ${p.name}:`, e);
-          }
-        }
-      }
-      showToast(`Finished syncing all playlists (${total} episodes updated)`);
+      // Run all enabled playlist syncs in parallel
+      const enabledPlaylists = playlists.filter((p) => p.enabled);
+      const results = await Promise.allSettled(
+        enabledPlaylists.map((p) => api.syncPlaylist(p.id))
+      );
+      const total = results.reduce((acc, r) =>
+        r.status === 'fulfilled' ? acc + (r.value?.episodesSynced ?? 0) : acc, 0
+      );
+      const failed = results.filter((r) => r.status === 'rejected').length;
+      const msg = failed > 0
+        ? `Sync done: ${total} episodes updated, ${failed} playlist(s) failed`
+        : `Finished syncing all playlists (${total} episodes updated)`;
+      showToast(msg, failed > 0 ? 'error' : 'success');
       const updated = await api.getPlaylists();
       setPlaylists(updated);
     } finally {
       setSyncingAll(false);
     }
-  };
+  }, [playlists, showToast]);
 
-  const handleSavePlaylist = async (data: any, shouldSyncNow = false) => {
+  // Errors propagate to PlaylistEditorModal, which shows them inline and stays open
+  const handleSavePlaylist = useCallback(async (data: any, shouldSyncNow = false) => {
     if (activePlaylist) {
       // Update
       await api.updatePlaylist(activePlaylist.id, data);
@@ -158,9 +176,9 @@ export const App: React.FC = () => {
 
     const updated = await api.getPlaylists();
     setPlaylists(updated);
-  };
+  }, [activePlaylist, showToast]);
 
-  const handleDeletePlaylist = async (playlist: Playlist) => {
+  const handleDeletePlaylist = useCallback(async (playlist: Playlist) => {
     const deleteFromPlex = confirm(
       `Delete playlist "${playlist.name}"?\n\nClick OK to also remove the playlist from your Plex server.\nClick Cancel to only remove it from this app.`
     );
@@ -173,9 +191,9 @@ export const App: React.FC = () => {
     } catch (err: any) {
       showToast(err.message || 'Failed to delete playlist', 'error');
     }
-  };
+  }, [showToast]);
 
-  const openEditorForNew = () => {
+  const openEditorForNew = useCallback(() => {
     if (!settings?.isConfigured) {
       alert('Please connect to your Plex server in Settings first.');
       setSettingsOpen(true);
@@ -183,17 +201,17 @@ export const App: React.FC = () => {
     }
     setActivePlaylist(null);
     setEditorOpen(true);
-  };
+  }, [settings?.isConfigured]);
 
-  const openEditorForEdit = (playlist: Playlist) => {
+  const openEditorForEdit = useCallback((playlist: Playlist) => {
     setActivePlaylist(playlist);
     setEditorOpen(true);
-  };
+  }, []);
 
-  const openPreview = (playlist: Playlist) => {
+  const openPreview = useCallback((playlist: Playlist) => {
     setActivePlaylist(playlist);
     setPreviewOpen(true);
-  };
+  }, []);
 
   return (
     <div className="min-h-screen bg-[#131517] text-gray-100 flex flex-col">
@@ -325,7 +343,7 @@ export const App: React.FC = () => {
 
       {/* Footer */}
       <footer className="bg-[#141618] border-t border-[#25292e] py-4 text-center text-xs text-gray-500">
-        <p>Plex Playlist Curator v{settings?.appVersion || '1.0.0'} • Optimized for Proxmox LXC & Docker</p>
+        <p>Plex Playlist Curator v{settings?.appVersion || '1.0.0'} &bull; Optimized for Proxmox LXC &amp; Docker</p>
       </footer>
 
       {/* Modals */}

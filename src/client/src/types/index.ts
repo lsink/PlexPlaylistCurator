@@ -63,7 +63,7 @@ export interface SettingsData {
   plexServerName: string;
   isConfigured: boolean;
   autoSyncIntervalMinutes: number;
-  webhookSecret: string;
+  hasWebhookSecret: boolean;
 }
 
 export interface SyncLog {

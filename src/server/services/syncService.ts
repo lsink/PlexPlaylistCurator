@@ -72,34 +72,37 @@ export class SyncService {
        WHERE id = ?`
     );
 
+    // Parallelize metadata fetches across all shows
+    const results = await Promise.allSettled(
+      shows.map((show) => plex.getShowMetadata(show.plex_show_rating_key))
+    );
+
     const refreshedShows = [];
 
-    for (const show of shows) {
-      try {
-        const metadata = await plex.getShowMetadata(show.plex_show_rating_key);
-        if (metadata) {
-          updateStmt.run(
-            metadata.seasonCount,
-            metadata.totalEpisodes,
-            metadata.unwatchedEpisodes,
-            metadata.thumb || show.show_thumb,
-            show.id
-          );
-          refreshedShows.push({
-            id: show.id,
-            ratingKey: show.plex_show_rating_key,
-            title: show.show_title,
-            thumb: metadata.thumb || show.show_thumb,
-            seasonCount: metadata.seasonCount,
-            totalEpisodes: metadata.totalEpisodes,
-            unwatchedEpisodes: metadata.unwatchedEpisodes,
-            sortOrder: show.sort_order,
-            manualWeight: show.manual_weight,
-          });
-        } else {
-          refreshedShows.push(show);
-        }
-      } catch {
+    for (let i = 0; i < shows.length; i++) {
+      const show = shows[i];
+      const result = results[i];
+      if (result.status === 'fulfilled' && result.value) {
+        const metadata = result.value;
+        updateStmt.run(
+          metadata.seasonCount,
+          metadata.totalEpisodes,
+          metadata.unwatchedEpisodes,
+          metadata.thumb || show.show_thumb,
+          show.id
+        );
+        refreshedShows.push({
+          id: show.id,
+          ratingKey: show.plex_show_rating_key,
+          title: show.show_title,
+          thumb: metadata.thumb || show.show_thumb,
+          seasonCount: metadata.seasonCount,
+          totalEpisodes: metadata.totalEpisodes,
+          unwatchedEpisodes: metadata.unwatchedEpisodes,
+          sortOrder: show.sort_order,
+          manualWeight: show.manual_weight,
+        });
+      } else {
         refreshedShows.push(show);
       }
     }
@@ -132,13 +135,20 @@ export class SyncService {
       'UPDATE playlist_shows SET unwatched_episodes = ? WHERE playlist_id = ? AND plex_show_rating_key = ?'
     );
 
-    for (const show of shows) {
-      const episodes = await plex.getShowEpisodes(
-        show.plex_show_rating_key,
-        playlist.unwatched_only === 1
-      );
+    const unwatchedOnly = playlist.unwatched_only === 1;
+    const episodeResults = await Promise.allSettled(
+      shows.map((show) => plex.getShowEpisodes(show.plex_show_rating_key, unwatchedOnly))
+    );
 
-      if (playlist.unwatched_only === 1) {
+    for (let i = 0; i < shows.length; i++) {
+      const show = shows[i];
+      const result = episodeResults[i];
+      if (result.status === 'rejected') {
+        throw new Error(`Failed to fetch episodes for "${show.show_title}": ${result.reason?.message || result.reason}`);
+      }
+      const episodes = result.value;
+
+      if (unwatchedOnly) {
         try {
           updateUnwatchedStmt.run(episodes.length, playlistId, show.plex_show_rating_key);
         } catch {}
@@ -216,13 +226,20 @@ export class SyncService {
         'UPDATE playlist_shows SET unwatched_episodes = ? WHERE playlist_id = ? AND plex_show_rating_key = ?'
       );
 
-      for (const show of shows) {
-        const episodes = await plex.getShowEpisodes(
-          show.plex_show_rating_key,
-          playlist.unwatched_only === 1
-        );
+      const syncUnwatchedOnly = playlist.unwatched_only === 1;
+      const syncEpisodeResults = await Promise.allSettled(
+        shows.map((show) => plex.getShowEpisodes(show.plex_show_rating_key, syncUnwatchedOnly))
+      );
 
-        if (playlist.unwatched_only === 1) {
+      for (let i = 0; i < shows.length; i++) {
+        const show = shows[i];
+        const result = syncEpisodeResults[i];
+        if (result.status === 'rejected') {
+          throw new Error(`Failed to fetch episodes for "${show.show_title}": ${result.reason?.message || result.reason}`);
+        }
+        const episodes = result.value;
+
+        if (syncUnwatchedOnly) {
           try {
             updateUnwatchedStmt.run(episodes.length, playlistId, show.plex_show_rating_key);
           } catch {}
@@ -360,10 +377,11 @@ export class SyncService {
       return;
     }
 
-    const showRatingKey = String(metadata?.grandparentRatingKey);
-    if (!showRatingKey) {
+    const rawRatingKey = metadata?.grandparentRatingKey;
+    if (!rawRatingKey) {
       return;
     }
+    const showRatingKey = String(rawRatingKey);
 
     console.log(`Webhook received: Show "${metadata.grandparentTitle}" episode watched.`);
 

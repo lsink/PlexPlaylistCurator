@@ -381,7 +381,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                 className="w-full bg-[#22262b] border border-[#343b42] text-white rounded-lg px-3.5 py-2 text-sm focus:outline-none focus:border-amber-500 placeholder-gray-500"
               />
               <p className="text-[11px] text-gray-500 mt-1">
-                Protect your dashboard interface on your local network.
+                Minimum 8 characters. Protects your dashboard on your local network.
               </p>
             </div>
           </div>

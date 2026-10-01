@@ -21,6 +21,8 @@ export const db: Database.Database = new Database(DB_PATH);
 // Enable WAL mode for high performance and durability
 db.pragma('journal_mode = WAL');
 db.pragma('foreign_keys = ON');
+db.pragma('busy_timeout = 5000');
+db.pragma('synchronous = NORMAL');
 
 // Initialize schema
 db.exec(SCHEMA_SQL);
@@ -44,5 +46,16 @@ try {
 try {
   db.exec('ALTER TABLE playlist_shows ADD COLUMN unwatched_episodes INTEGER');
 } catch {}
+
+// Note: SQLite does not support ALTER COLUMN to change type.
+// manual_weight column stores REAL values correctly even if schema shows INTEGER (SQLite is type-flexible).
+// New databases will use the REAL type declared in the schema above.
+
+// Graceful shutdown — ensure WAL checkpoint completes
+process.on('exit', () => {
+  try { db.close(); } catch {}
+});
+process.on('SIGINT', () => process.exit(0));
+process.on('SIGTERM', () => process.exit(0));
 
 export default db;

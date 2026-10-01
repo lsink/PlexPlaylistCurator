@@ -162,28 +162,32 @@ export class PlexService {
     const libraries = await this.getShowLibraries();
     const results: PlexShowSummary[] = [];
 
-    for (const lib of libraries) {
-      try {
-        const response = await this.client.get(
-          `/library/sections/${lib.key}/all?type=2&title=${encodeURIComponent(query)}`
-        );
-        const metadataList = response.data?.MediaContainer?.Metadata || [];
-        for (const item of metadataList) {
-          const totalLeaves = item.leafCount || 0;
-          const viewedLeaves = item.viewedLeafCount || 0;
-          results.push({
-            ratingKey: String(item.ratingKey),
-            title: item.title,
-            thumb: item.thumb,
-            art: item.art,
-            year: item.year,
-            seasonCount: item.childCount || 1,
-            totalEpisodes: totalLeaves,
-            unwatchedEpisodes: Math.max(0, totalLeaves - viewedLeaves),
-          });
-        }
-      } catch (err) {
-        console.error(`Error searching library ${lib.key}:`, err);
+    const libraryResults = await Promise.allSettled(
+      libraries.map((lib) =>
+        this.client.get(`/library/sections/${lib.key}/all?type=2&title=${encodeURIComponent(query)}`)
+      )
+    );
+
+    for (let i = 0; i < libraries.length; i++) {
+      const result = libraryResults[i];
+      if (result.status === 'rejected') {
+        console.error(`Error searching library ${libraries[i].key}:`, result.reason);
+        continue;
+      }
+      const metadataList = result.value.data?.MediaContainer?.Metadata || [];
+      for (const item of metadataList) {
+        const totalLeaves = item.leafCount || 0;
+        const viewedLeaves = item.viewedLeafCount || 0;
+        results.push({
+          ratingKey: String(item.ratingKey),
+          title: item.title,
+          thumb: item.thumb,
+          art: item.art,
+          year: item.year,
+          seasonCount: item.childCount || 1,
+          totalEpisodes: totalLeaves,
+          unwatchedEpisodes: Math.max(0, totalLeaves - viewedLeaves),
+        });
       }
     }
 
@@ -360,18 +364,32 @@ export class PlexService {
 
     const newPlaylistRatingKey = String(createdMetadata.ratingKey);
 
-    // Step 2: Append remaining items sequentially
-    for (let i = 1; i < episodeRatingKeys.length; i++) {
-      const key = episodeRatingKeys[i];
-      const itemUri = `server://${machineId}/com.plexapp.plugins.library/library/metadata/${key}`;
+    // Step 2: Append remaining items in batches
+    // Plex accepts a comma-separated uri param; batch to avoid URL length limits
+    const BATCH_SIZE = 50;
+    const remainingKeys = episodeRatingKeys.slice(1);
+
+    for (let i = 0; i < remainingKeys.length; i += BATCH_SIZE) {
+      const batchKeys = remainingKeys.slice(i, i + BATCH_SIZE);
+      // Plex expects ONE server:// URI with comma-separated rating keys
+      const batchUri = `server://${machineId}/com.plexapp.plugins.library/library/metadata/${batchKeys.join(',')}`;
       try {
         await this.client.put(`/playlists/${newPlaylistRatingKey}/items`, null, {
-          params: {
-            uri: itemUri,
-          },
+          params: { uri: batchUri },
         });
       } catch (err) {
-        console.error(`Error adding episode ${key} to playlist ${newPlaylistRatingKey}:`, err);
+        console.error(`Error adding batch to playlist ${newPlaylistRatingKey}:`, err);
+        // Fall back to individual adds for this batch if batch fails
+        for (const key of batchKeys) {
+          try {
+            const itemUri = `server://${machineId}/com.plexapp.plugins.library/library/metadata/${key}`;
+            await this.client.put(`/playlists/${newPlaylistRatingKey}/items`, null, {
+              params: { uri: itemUri },
+            });
+          } catch (innerErr) {
+            console.error(`Error adding episode ${key} to playlist:`, innerErr);
+          }
+        }
       }
     }
 

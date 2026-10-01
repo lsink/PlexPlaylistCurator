@@ -39,7 +39,7 @@ CREATE TABLE IF NOT EXISTS playlist_shows (
   total_episodes INTEGER,
   unwatched_episodes INTEGER,
   sort_order INTEGER NOT NULL DEFAULT 0,
-  manual_weight INTEGER NOT NULL DEFAULT 1,
+  manual_weight REAL NOT NULL DEFAULT 1,
   created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
   FOREIGN KEY (playlist_id) REFERENCES playlists (id) ON DELETE CASCADE
 );
@@ -54,6 +54,13 @@ CREATE TABLE IF NOT EXISTS sync_logs (
   trigger_type TEXT NOT NULL DEFAULT 'manual',
   created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
+
+
+-- Performance indexes
+CREATE INDEX IF NOT EXISTS idx_playlist_shows_playlist_id ON playlist_shows (playlist_id);
+CREATE INDEX IF NOT EXISTS idx_playlist_shows_rating_key ON playlist_shows (plex_show_rating_key);
+CREATE INDEX IF NOT EXISTS idx_sync_logs_created_at ON sync_logs (created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_playlists_enabled ON playlists (enabled);
 
 -- Seed default settings row if missing
 INSERT OR IGNORE INTO settings (id, plex_url, plex_token, is_configured, auto_sync_interval_minutes)

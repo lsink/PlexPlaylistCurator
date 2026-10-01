@@ -31,7 +31,8 @@ export const QueuePreviewModal: React.FC<QueuePreviewModalProps> = ({
     } else {
       setPreview(null);
     }
-  }, [isOpen, playlist]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isOpen, playlist?.id]);
 
   const loadPreview = async (id: string) => {
     try {
