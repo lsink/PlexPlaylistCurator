@@ -1,8 +1,11 @@
 import { describe, it, expect } from 'vitest';
 import {
   interleaveEpisodes,
+  continueSchedule,
   ShowConfig,
   EpisodeItem,
+  InterleaveOptions,
+  SchedulerState,
 } from './interleaveEngine.js';
 
 function makeMockEpisodes(
@@ -445,6 +448,116 @@ describe('interleaveEngine', () => {
       'Show A',
       'Show B',
     ]);
+  });
+});
+
+describe('continueSchedule (rotation survives playlist rebuilds)', () => {
+  // Shows built from a "watched so far" count, the way the sync service sees them (unwatched episodes only)
+  const showsAfter = (spec: Record<string, number>, watched: Record<string, number>, minutes: Record<string, number> = {}): ShowConfig[] =>
+    Object.entries(spec).map(([key, total]) => ({
+      ratingKey: key,
+      title: key,
+      manualWeight: key === 'A' ? 3 : 1,
+      episodes: Array.from({ length: total - (watched[key] || 0) }, (_, i) => {
+        const n = (watched[key] || 0) + i + 1;
+        return {
+          ratingKey: `${key}-${n}`,
+          showRatingKey: key,
+          showTitle: key,
+          seasonNumber: 1,
+          episodeNumber: n,
+          title: `${key} ${n}`,
+          duration: (minutes[key] ?? 22) * 60000,
+        };
+      }),
+    }));
+
+  // Repeatedly watch the first episode of the playlist and rebuild it, like the webhook does
+  function watchAndRebuild(spec: Record<string, number>, options: InterleaveOptions, episodesToWatch: number, minutes?: Record<string, number>) {
+    const watched: Record<string, number> = {};
+    let previous: { queue: string[]; state: SchedulerState } | null = null;
+    const order: string[] = [];
+    let firstQueue: string[] = [];
+    for (let i = 0; i < episodesToWatch; i++) {
+      const result = continueSchedule(showsAfter(spec, watched, minutes), options, previous);
+      if (i === 0) firstQueue = result.episodes.map((e) => e.showRatingKey);
+      const next = result.episodes[0];
+      if (!next) break;
+      order.push(next.showRatingKey);
+      watched[next.showRatingKey] = (watched[next.showRatingKey] || 0) + 1;
+      previous = { queue: result.episodes.map((e) => e.ratingKey), state: result.state };
+    }
+    return { order, firstQueue };
+  }
+
+  const spec = { A: 190, B: 209, C: 236, D: 212 };
+
+  it('round-robin keeps rotating through the shows instead of replaying the first one', () => {
+    const options: InterleaveOptions = { mode: 'round_robin', bufferSize: 7, minConsecutive: 2 };
+    const { order } = watchAndRebuild(spec, options, 40);
+    // Identical to one long uninterrupted queue, including batches of 2 cut off by the 7-episode buffer
+    const intended = interleaveEpisodes(showsAfter(spec, {}), { ...options, bufferSize: 40 }).map((e) => e.showRatingKey);
+    expect(order).toEqual(intended);
+  });
+
+  it('manual weights keep their pattern across rebuilds (with batches cut off by the buffer)', () => {
+    const options: InterleaveOptions = { mode: 'manual_weighted', bufferSize: 5, minConsecutive: 1, maxConsecutive: 2 };
+    const { order } = watchAndRebuild(spec, options, 60);
+    const intended = interleaveEpisodes(showsAfter(spec, {}), { ...options, bufferSize: 60 }).map((e) => e.showRatingKey);
+    expect(order).toEqual(intended);
+  });
+
+  for (const mode of ['auto_proportional', 'runtime_balanced'] as const) {
+    it(`${mode}: plays the synced queue in order, then keeps every show in rotation`, () => {
+      const options: InterleaveOptions = { mode, bufferSize: 30, minConsecutive: 1, maxConsecutive: 2 };
+      const { order, firstQueue } = watchAndRebuild(spec, options, 120, { A: 22, B: 22, C: 21, D: 20 });
+      expect(order.slice(0, 30)).toEqual(firstQueue);
+      const counts: Record<string, number> = {};
+      order.forEach((k) => (counts[k] = (counts[k] || 0) + 1));
+      for (const key of Object.keys(spec)) {
+        expect(counts[key]).toBeGreaterThanOrEqual(20); // ~30 each; before the fix one show got all 120
+      }
+      let run = 1;
+      for (let i = 1; i < order.length; i++) {
+        run = order[i] === order[i - 1] ? run + 1 : 1;
+        expect(run).toBeLessThanOrEqual(2); // never more than "max in a row"
+      }
+    });
+  }
+
+  it('chronological mode always rebuilds (air-date order is already stable)', () => {
+    const shows = [
+      { ratingKey: 'A', title: 'A', episodes: makeMockEpisodes('A', 'A', 5) },
+      { ratingKey: 'B', title: 'B', episodes: makeMockEpisodes('B', 'B', 5) },
+    ];
+    const options: InterleaveOptions = { mode: 'chronological', bufferSize: 6 };
+    const result = continueSchedule(shows, options, { queue: ['B-s1e1'], state: { credits: {}, nextShow: null, carry: null } });
+    expect(result.continued).toBe(false);
+    expect(result.episodes.map((e) => e.ratingKey)).toEqual(interleaveEpisodes(shows, options).map((e) => e.ratingKey));
+  });
+
+  it('keeps the queue when an episode is watched out of order or a new one is added at the end', () => {
+    const options: InterleaveOptions = { mode: 'round_robin', bufferSize: 6 };
+    const first = continueSchedule(showsAfter({ A: 10, B: 10 }, {}), options, null);
+    const previous = { queue: first.episodes.map((e) => e.ratingKey), state: first.state };
+    expect(previous.queue).toEqual(['A-1', 'B-1', 'A-2', 'B-2', 'A-3', 'B-3']);
+
+    // B-2 watched elsewhere (out of order), and a new episode A-11 appeared in the library
+    const shows = showsAfter({ A: 11, B: 10 }, {});
+    shows[1].episodes = shows[1].episodes.filter((e) => e.ratingKey !== 'B-2');
+    const next = continueSchedule(shows, options, previous);
+    expect(next.continued).toBe(true);
+    expect(next.episodes.map((e) => e.ratingKey)).toEqual(['A-1', 'B-1', 'A-2', 'A-3', 'B-3', 'A-4']);
+  });
+
+  it('rebuilds cleanly when an earlier episode becomes unwatched again', () => {
+    const options: InterleaveOptions = { mode: 'round_robin', bufferSize: 4 };
+    const first = continueSchedule(showsAfter({ A: 10, B: 10 }, { A: 2, B: 2 }), options, null);
+    const previous = { queue: first.episodes.map((e) => e.ratingKey), state: first.state };
+    // A-1 marked unwatched: it now comes before the kept A-3, so the kept order can't be trusted
+    const next = continueSchedule(showsAfter({ A: 10, B: 10 }, { A: 0, B: 2 }), options, previous);
+    expect(next.continued).toBe(false);
+    expect(next.episodes[0].ratingKey).toBe('A-1');
   });
 });
 

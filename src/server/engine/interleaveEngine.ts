@@ -28,6 +28,30 @@ export interface InterleaveOptions {
 }
 
 /**
+ * Scheduler position, saved between syncs so a rebuilt playlist continues the rotation instead of restarting it.
+ * Keyed by show ratingKey so shows can be added, emptied or reordered without breaking it.
+ */
+export interface SchedulerState {
+  /** Smooth weighted round-robin: accumulated credit per show */
+  credits: Record<string, number>;
+  /** Round-robin: the show whose turn is next */
+  nextShow: string | null;
+  /** A batch (consecutive episodes of one show) cut short by the buffer limit, finished first next time */
+  carry: { show: string; remaining: number } | null;
+}
+
+export interface ScheduleResult {
+  episodes: EpisodeItem[];
+  state: SchedulerState;
+}
+
+const cloneState = (state: SchedulerState | null | undefined): SchedulerState => ({
+  credits: { ...(state?.credits ?? {}) },
+  nextShow: state?.nextShow ?? null,
+  carry: state?.carry ? { ...state.carry } : null,
+});
+
+/**
  * Computes per-show batch sizes within [minConsecutive, maxConsecutive]
  * scaled proportionally to each show's relative weight / demand.
  */
@@ -65,14 +89,27 @@ export function interleaveEpisodes(
   shows: ShowConfig[],
   options: InterleaveOptions
 ): EpisodeItem[] {
+  return interleaveWithState(shows, options, null).episodes;
+}
+
+/**
+ * Same as interleaveEpisodes, but starts from (and returns) a saved scheduler position.
+ * With a null state the output is identical to interleaveEpisodes.
+ */
+export function interleaveWithState(
+  shows: ShowConfig[],
+  options: InterleaveOptions,
+  state: SchedulerState | null
+): ScheduleResult {
+  const st = cloneState(state);
   if (!shows || shows.length === 0) {
-    return [];
+    return { episodes: [], state: st };
   }
 
   // Filter shows with episodes and make copies of episode queues
   const activeShows = shows.filter((s) => s.episodes && s.episodes.length > 0);
   if (activeShows.length === 0) {
-    return [];
+    return { episodes: [], state: st };
   }
 
   const bufferSize = options.bufferSize && options.bufferSize > 0 ? options.bufferSize : Infinity;
@@ -86,19 +123,67 @@ export function interleaveEpisodes(
   );
 
   switch (options.mode) {
-    case 'round_robin':
-      return interleaveRoundRobin(activeShows, bufferSize, minConsecutive);
     case 'auto_proportional':
-      return interleaveAutoProportional(activeShows, bufferSize, minConsecutive, maxConsecutive);
+      return interleaveAutoProportional(activeShows, bufferSize, minConsecutive, maxConsecutive, st);
     case 'manual_weighted':
-      return interleaveManualWeighted(activeShows, bufferSize, minConsecutive, maxConsecutive);
+      return interleaveManualWeighted(activeShows, bufferSize, minConsecutive, maxConsecutive, st);
     case 'chronological':
-      return interleaveChronological(activeShows, bufferSize);
+      return { episodes: interleaveChronological(activeShows, bufferSize), state: st };
     case 'runtime_balanced':
-      return interleaveRuntimeBalanced(activeShows, bufferSize, minConsecutive, maxConsecutive);
+      return interleaveRuntimeBalanced(activeShows, bufferSize, minConsecutive, maxConsecutive, st);
+    case 'round_robin':
     default:
-      return interleaveRoundRobin(activeShows, bufferSize, minConsecutive);
+      // All shows (not just active ones) so the saved "next show" can be found even if it has run dry
+      return interleaveRoundRobin(shows, bufferSize, minConsecutive, st);
   }
+}
+
+/**
+ * Continue a previously synced queue instead of rebuilding it from scratch.
+ *
+ * Rebuilding from scratch restarts the rotation every time, so after each watched episode the playlist would
+ * begin with the same show again. Instead: keep the previous queue's order, drop the episodes that are no longer
+ * eligible (watched, removed), and fill the end by continuing the rotation from the saved scheduler state.
+ *
+ * Falls back to a clean rebuild (continued: false) when there is nothing to continue, for chronological mode
+ * (a global air-date order is already stable), or when a show's kept episodes are no longer the start of its
+ * episode list (e.g. an earlier episode was marked unwatched, or a missing one was added to the library).
+ */
+export function continueSchedule(
+  shows: ShowConfig[],
+  options: InterleaveOptions,
+  previous: { queue: string[]; state: SchedulerState } | null
+): ScheduleResult & { continued: boolean } {
+  const fresh = () => ({ ...interleaveWithState(shows, options, null), continued: false });
+  if (!previous || options.mode === 'chronological') return fresh();
+
+  const showIndexByEpisode = new Map<string, number>();
+  const episodeByKey = new Map<string, EpisodeItem>();
+  shows.forEach((show, i) =>
+    show.episodes.forEach((ep) => {
+      showIndexByEpisode.set(ep.ratingKey, i);
+      episodeByKey.set(ep.ratingKey, ep);
+    })
+  );
+
+  const kept = previous.queue.filter((key) => episodeByKey.has(key)).map((key) => episodeByKey.get(key)!);
+
+  // Each show's kept episodes must be exactly the first N of its current list, in the same order
+  const keptCounts = new Array(shows.length).fill(0);
+  for (const ep of kept) {
+    const i = showIndexByEpisode.get(ep.ratingKey)!;
+    if (shows[i].episodes[keptCounts[i]]?.ratingKey !== ep.ratingKey) return fresh();
+    keptCounts[i]++;
+  }
+
+  const bufferSize = options.bufferSize && options.bufferSize > 0 ? options.bufferSize : Infinity;
+  if (kept.length >= bufferSize) {
+    return { episodes: kept.slice(0, bufferSize), state: cloneState(previous.state), continued: true };
+  }
+
+  const rest = shows.map((show, i) => ({ ...show, episodes: show.episodes.slice(keptCounts[i]) }));
+  const extension = interleaveWithState(rest, { ...options, bufferSize: bufferSize - kept.length }, previous.state);
+  return { episodes: [...kept, ...extension.episodes], state: extension.state, continued: true };
 }
 
 /**
@@ -107,23 +192,56 @@ export function interleaveEpisodes(
 function interleaveRoundRobin(
   shows: ShowConfig[],
   bufferSize: number,
-  consecutiveEpisodes = 1
-): EpisodeItem[] {
+  consecutiveEpisodes: number,
+  st: SchedulerState
+): ScheduleResult {
   const queues = shows.map((s) => [...s.episodes]);
   const result: EpisodeItem[] = [];
+  const n = shows.length;
+  let carry: SchedulerState['carry'] = null;
 
-  let hasMore = true;
-  while (hasMore && result.length < bufferSize) {
-    hasMore = false;
-    for (let i = 0; i < queues.length; i++) {
-      for (let c = 0; c < consecutiveEpisodes && queues[i].length > 0 && result.length < bufferSize; c++) {
-        result.push(queues[i].shift()!);
-        hasMore = true;
+  // Finish a batch that was cut short by the buffer last time
+  if (st.carry) {
+    const j = shows.findIndex((s) => s.ratingKey === st.carry!.show);
+    if (j >= 0) {
+      let emitted = 0;
+      while (emitted < st.carry.remaining && queues[j].length > 0 && result.length < bufferSize) {
+        result.push(queues[j].shift()!);
+        emitted++;
+      }
+      if (emitted < st.carry.remaining && queues[j].length > 0) {
+        carry = { show: st.carry.show, remaining: st.carry.remaining - emitted };
       }
     }
   }
 
-  return result;
+  let idx = 0;
+  if (st.nextShow) {
+    const j = shows.findIndex((s) => s.ratingKey === st.nextShow);
+    if (j >= 0) idx = j;
+  }
+
+  let emptyTurns = 0;
+  while (result.length < bufferSize && emptyTurns < n) {
+    const queue = queues[idx];
+    if (queue.length === 0) {
+      emptyTurns++;
+      idx = (idx + 1) % n;
+      continue;
+    }
+    emptyTurns = 0;
+    let emitted = 0;
+    while (emitted < consecutiveEpisodes && queue.length > 0 && result.length < bufferSize) {
+      result.push(queue.shift()!);
+      emitted++;
+    }
+    if (emitted < consecutiveEpisodes && queue.length > 0) {
+      carry = { show: shows[idx].ratingKey, remaining: consecutiveEpisodes - emitted };
+    }
+    idx = (idx + 1) % n;
+  }
+
+  return { episodes: result, state: { ...st, nextShow: shows[idx].ratingKey, carry } };
 }
 
 /**
@@ -133,16 +251,17 @@ function interleaveRoundRobin(
 function interleaveAutoProportional(
   shows: ShowConfig[],
   bufferSize: number,
-  minConsecutive = 1,
-  maxConsecutive = 1
-): EpisodeItem[] {
+  minConsecutive: number,
+  maxConsecutive: number,
+  st: SchedulerState
+): ScheduleResult {
   // Weights are initial episode counts (or minimum 1)
   const initialWeights = shows.map((s) => Math.max(1, s.episodes.length));
   const batchSizes = computeBatchSizes(initialWeights, minConsecutive, maxConsecutive);
   const adjustedWeights = initialWeights.map((w, idx) =>
     Math.max(1, Math.round(w / (batchSizes[idx] || 1)))
   );
-  return executeSWRR(shows, adjustedWeights, bufferSize, batchSizes);
+  return executeSWRR(shows, adjustedWeights, bufferSize, batchSizes, st);
 }
 
 /**
@@ -152,9 +271,10 @@ function interleaveAutoProportional(
 function interleaveManualWeighted(
   shows: ShowConfig[],
   bufferSize: number,
-  minConsecutive = 1,
-  maxConsecutive = 1
-): EpisodeItem[] {
+  minConsecutive: number,
+  maxConsecutive: number,
+  st: SchedulerState
+): ScheduleResult {
   const weights = shows.map((s) => {
     if (typeof s.manualWeight === 'number' && s.manualWeight > 0) {
       return Math.round(s.manualWeight);
@@ -165,7 +285,7 @@ function interleaveManualWeighted(
   const adjustedWeights = weights.map((w, idx) =>
     Math.max(1, Math.round(w / (batchSizes[idx] || 1)))
   );
-  return executeSWRR(shows, adjustedWeights, bufferSize, batchSizes);
+  return executeSWRR(shows, adjustedWeights, bufferSize, batchSizes, st);
 }
 
 /**
@@ -176,11 +296,28 @@ function executeSWRR(
   shows: ShowConfig[],
   weights: number[],
   bufferSize: number,
-  batchSizes: number[]
-): EpisodeItem[] {
+  batchSizes: number[],
+  st: SchedulerState
+): ScheduleResult {
   const queues = shows.map((s) => [...s.episodes]);
-  const currentCredits = new Array(shows.length).fill(0);
+  const currentCredits = shows.map((s) => st.credits[s.ratingKey] ?? 0);
   const result: EpisodeItem[] = [];
+  let carry: SchedulerState['carry'] = null;
+
+  // Finish a batch that was cut short by the buffer last time (its turn was already paid for)
+  if (st.carry) {
+    const j = shows.findIndex((s) => s.ratingKey === st.carry!.show);
+    if (j >= 0) {
+      let emitted = 0;
+      while (emitted < st.carry.remaining && queues[j].length > 0 && result.length < bufferSize) {
+        result.push(queues[j].shift()!);
+        emitted++;
+      }
+      if (emitted < st.carry.remaining && queues[j].length > 0) {
+        carry = { show: st.carry.show, remaining: st.carry.remaining - emitted };
+      }
+    }
+  }
 
   while (result.length < bufferSize) {
     // 1. Identify indices that still have episodes
@@ -220,15 +357,24 @@ function executeSWRR(
 
     // 5. Emit up to batchSizes[bestIdx] from bestIdx
     const countToEmit = batchSizes[bestIdx] || 1;
+    let emitted = 0;
     for (let c = 0; c < countToEmit && queues[bestIdx].length > 0 && result.length < bufferSize; c++) {
       const ep = queues[bestIdx].shift();
       if (ep) {
         result.push(ep);
+        emitted++;
       }
+    }
+    if (emitted < countToEmit && queues[bestIdx].length > 0) {
+      carry = { show: shows[bestIdx].ratingKey, remaining: countToEmit - emitted };
     }
   }
 
-  return result;
+  const credits = { ...st.credits };
+  shows.forEach((s, i) => {
+    credits[s.ratingKey] = currentCredits[i];
+  });
+  return { episodes: result, state: { ...st, credits, carry } };
 }
 
 /**
@@ -278,9 +424,10 @@ function interleaveChronological(shows: ShowConfig[], bufferSize: number): Episo
 function interleaveRuntimeBalanced(
   shows: ShowConfig[],
   bufferSize: number,
-  minConsecutive = 1,
-  maxConsecutive = 1
-): EpisodeItem[] {
+  minConsecutive: number,
+  maxConsecutive: number,
+  st: SchedulerState
+): ScheduleResult {
   // Calculate average duration in minutes for each show
   const avgDurations = shows.map((s) => {
     const episodesWithDuration = s.episodes.filter(
@@ -320,5 +467,5 @@ function interleaveRuntimeBalanced(
   const commonGcd = adjustedWeights.reduce((acc, w) => gcd(acc, w), adjustedWeights[0] || 1);
   const weights = adjustedWeights.map((w) => Math.max(1, Math.round(w / commonGcd)));
 
-  return executeSWRR(shows, weights, bufferSize, batchSizes);
+  return executeSWRR(shows, weights, bufferSize, batchSizes, st);
 }

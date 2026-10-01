@@ -138,7 +138,11 @@ export const App: React.FC = () => {
   const handleSyncPlaylist = useCallback(async (id: string) => {
     try {
       const res = await api.syncPlaylist(id);
-      showToast(`Successfully synced ${res.episodesSynced} episodes to Plex!`);
+      showToast(
+        res.unchanged
+          ? `Already up to date: Plex has the same ${res.episodesSynced} episodes`
+          : `Successfully synced ${res.episodesSynced} episodes to Plex!`
+      );
       // Reload playlists to reflect updated timestamps
       const updated = await api.getPlaylists();
       setPlaylists(updated);

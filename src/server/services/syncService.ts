@@ -2,9 +2,10 @@ import { randomUUID } from 'crypto';
 import db from '../db/index.js';
 import { PlexService } from '../plex/plexService.js';
 import {
-  interleaveEpisodes,
+  continueSchedule,
   ShowConfig,
   InterleaveMode,
+  SchedulerState,
 } from '../engine/interleaveEngine.js';
 
 export interface PlaylistRecord {
@@ -19,6 +20,8 @@ export interface PlaylistRecord {
   last_synced_at: string | null;
   last_sync_status: string | null;
   last_synced_queue?: string | null;
+  schedule_state?: string | null;
+  schedule_config?: string | null;
   include_specials?: number;
   consecutive_episodes?: number;
   min_consecutive_episodes?: number;
@@ -63,7 +66,7 @@ export class SyncService {
     try {
       db.prepare(`DELETE FROM sync_logs WHERE created_at < datetime('now', ?)`).run(`-${this.LOG_RETENTION_DAYS} days`);
       db.prepare(
-        `DELETE FROM sync_logs WHERE id NOT IN (SELECT id FROM sync_logs ORDER BY created_at DESC LIMIT ?)`
+        `DELETE FROM sync_logs WHERE id NOT IN (SELECT id FROM sync_logs ORDER BY created_at DESC, rowid DESC LIMIT ?)`
       ).run(this.LOG_MAX_ENTRIES);
     } catch (err) {
       console.error('Failed to prune sync logs:', err);
@@ -107,6 +110,67 @@ export class SyncService {
       added,
       unchanged: baseline.length - removed.length,
     };
+  }
+
+  /**
+   * The settings that shape the rotation. When any of them change, the saved rotation no longer applies and the
+   * next sync starts it over (the show order is part of it because round-robin follows it).
+   */
+  private static scheduleConfigKey(playlist: PlaylistRecord, shows: PlaylistShowRecord[]): string {
+    return JSON.stringify({
+      mode: playlist.mode,
+      buffer: playlist.buffer_size,
+      unwatchedOnly: playlist.unwatched_only,
+      specials: playlist.include_specials,
+      min: playlist.min_consecutive_episodes || playlist.consecutive_episodes || 1,
+      max: playlist.max_consecutive_episodes || playlist.min_consecutive_episodes || playlist.consecutive_episodes || 1,
+      shows: shows.map((s) => [s.plex_show_rating_key, s.manual_weight]),
+    });
+  }
+
+  /** The last synced queue and rotation position, if they still apply to the playlist's current settings */
+  private static previousSchedule(playlist: PlaylistRecord, configKey: string): { queue: string[]; state: SchedulerState } | null {
+    if (playlist.schedule_config !== configKey || !playlist.last_synced_queue || !playlist.schedule_state) return null;
+    try {
+      const queue = (JSON.parse(playlist.last_synced_queue) as { ratingKey: string }[]).map((ep) => String(ep.ratingKey));
+      return { queue, state: JSON.parse(playlist.schedule_state) };
+    } catch {
+      return null;
+    }
+  }
+
+  /** Build the queue, continuing the previous rotation where possible (see continueSchedule) */
+  private static buildQueue(playlist: PlaylistRecord, shows: PlaylistShowRecord[], showConfigs: ShowConfig[]) {
+    const configKey = this.scheduleConfigKey(playlist, shows);
+    const minConsecutive = playlist.min_consecutive_episodes || playlist.consecutive_episodes || 1;
+    const maxConsecutive = playlist.max_consecutive_episodes || minConsecutive;
+    const result = continueSchedule(
+      showConfigs,
+      { mode: playlist.mode, bufferSize: playlist.buffer_size, minConsecutive, maxConsecutive },
+      this.previousSchedule(playlist, configKey)
+    );
+    return { ...result, configKey };
+  }
+
+  /**
+   * True when Plex already holds exactly this queue, so the playlist doesn't need to be rebuilt.
+   * Rebuilding gives the playlist a new ID (which breaks pins and favourites in Plex), so it's worth one request to check.
+   */
+  private static async isPlexPlaylistCurrent(plex: PlexService, playlist: PlaylistRecord, keys: string[]): Promise<boolean> {
+    let lastPushed: string[] | null = null;
+    try {
+      lastPushed = (JSON.parse(playlist.last_synced_queue || 'null') as { ratingKey: string }[] | null)?.map((ep) => String(ep.ratingKey)) ?? null;
+    } catch {
+      lastPushed = null;
+    }
+    // Cheap check first: anything different from what we pushed last time needs a rebuild
+    if (!lastPushed || lastPushed.length !== keys.length || lastPushed.some((k, i) => k !== keys[i])) return false;
+    if (keys.length === 0) return !playlist.plex_playlist_id;
+    if (!playlist.plex_playlist_id) return false;
+
+    // Then confirm Plex still has exactly that, in case the playlist was deleted or edited by hand
+    const actual = await plex.getPlaylistItemKeys(playlist.plex_playlist_id);
+    return !!actual && actual.length === keys.length && actual.every((k, i) => k === keys[i]);
   }
 
   /** Season 0 is Plex's "Specials"; playlists can opt out of them */
@@ -262,15 +326,8 @@ export class SyncService {
       });
     }
 
-    const minConsecutive = playlist.min_consecutive_episodes || playlist.consecutive_episodes || 1;
-    const maxConsecutive = playlist.max_consecutive_episodes || minConsecutive;
-
-    const queue = interleaveEpisodes(showConfigs, {
-      mode: playlist.mode,
-      bufferSize: playlist.buffer_size,
-      minConsecutive,
-      maxConsecutive,
-    });
+    // Same continuation logic as the next sync, so the preview shows exactly what would be pushed
+    const queue = this.buildQueue(playlist, shows, showConfigs).episodes;
 
     return {
       episodes: queue,
@@ -370,17 +427,35 @@ export class SyncService {
         });
       }
 
-      const syncMinConsecutive = playlist.min_consecutive_episodes || playlist.consecutive_episodes || 1;
-      const syncMaxConsecutive = playlist.max_consecutive_episodes || syncMinConsecutive;
-
-      const queue = interleaveEpisodes(showConfigs, {
-        mode: playlist.mode,
-        bufferSize: playlist.buffer_size,
-        minConsecutive: syncMinConsecutive,
-        maxConsecutive: syncMaxConsecutive,
-      });
-
+      const scheduled = this.buildQueue(playlist, shows, showConfigs);
+      const queue = scheduled.episodes;
       const episodeRatingKeys = queue.map((ep) => ep.ratingKey);
+      const scheduleState = JSON.stringify(scheduled.state);
+
+      if (await this.isPlexPlaylistCurrent(plex, playlist, episodeRatingKeys)) {
+        db.prepare(
+          `UPDATE playlists SET
+            last_synced_at = CURRENT_TIMESTAMP,
+            last_sync_status = 'success',
+            schedule_state = ?,
+            schedule_config = ?,
+            updated_at = CURRENT_TIMESTAMP
+          WHERE id = ?`
+        ).run(scheduleState, scheduled.configKey, playlist.id);
+
+        // Scheduled and webhook checks that find nothing to do would otherwise fill the history; only log manual ones
+        if (triggerType === 'manual') {
+          db.prepare(
+            'INSERT INTO sync_logs (id, playlist_id, playlist_name, status, episodes_synced, message, trigger_type) VALUES (?, ?, ?, ?, ?, ?, ?)'
+          ).run(logId, playlist.id, playlist.name, 'success', queue.length, `No changes: Plex playlist already up to date (${queue.length} episodes)`, triggerType);
+        }
+        return {
+          success: true,
+          unchanged: true,
+          episodesSynced: queue.length,
+          plexPlaylistId: playlist.plex_playlist_id,
+        };
+      }
 
       // Perform Plex sync
       const result = await plex.syncPlaylist(
@@ -396,9 +471,11 @@ export class SyncService {
           last_synced_at = CURRENT_TIMESTAMP, 
           last_sync_status = 'success',
           last_synced_queue = ?,
+          schedule_state = ?,
+          schedule_config = ?,
           updated_at = CURRENT_TIMESTAMP 
         WHERE id = ?`
-      ).run(result.plexPlaylistId, JSON.stringify(this.toSnapshot(queue)), playlist.id);
+      ).run(result.plexPlaylistId, JSON.stringify(this.toSnapshot(queue)), scheduleState, scheduled.configKey, playlist.id);
 
       // Log success
       db.prepare(
@@ -607,8 +684,12 @@ export class SyncService {
     });
 
     try {
-      await this.syncPlaylistById(playlistId, 'webhook');
-      this.updateWebhookEvent(eventId, 'synced', `${added}; synced ${playlist.name}`);
+      const result = await this.syncPlaylistById(playlistId, 'webhook');
+      this.updateWebhookEvent(
+        eventId,
+        'synced',
+        result?.unchanged ? `${added}; ${playlist.name} already up to date` : `${added}; synced ${playlist.name}`
+      );
     } catch (err: any) {
       if (/already in progress/i.test(err?.message || '')) {
         this.updateWebhookEvent(eventId, 'synced', `${added}; ${playlist.name} was already syncing (follow-up queued)`);
@@ -673,13 +754,15 @@ export class SyncService {
     const eventId = note('syncing', matchingPlaylists.map((p) => p.name).join(', '));
 
     let ok = 0;
+    let upToDate = 0;
     let busy = 0;
     const failures: string[] = [];
     for (const p of matchingPlaylists) {
       console.log(`Advancing playlist ${p.id} via webhook trigger...`);
       try {
-        await this.syncPlaylistById(p.id, 'webhook');
-        ok++;
+        const result = await this.syncPlaylistById(p.id, 'webhook');
+        if (result?.unchanged) upToDate++;
+        else ok++;
       } catch (err: any) {
         if (/already in progress/i.test(err?.message || '')) {
           busy++; // a follow-up sync was queued by the lock
@@ -693,7 +776,9 @@ export class SyncService {
     if (failures.length > 0) {
       this.updateWebhookEvent(eventId, 'error', failures.join('; '));
     } else {
-      const parts = [`Synced ${ok} playlist${ok === 1 ? '' : 's'}`];
+      const parts: string[] = [];
+      if (ok > 0 || (upToDate === 0 && busy === 0)) parts.push(`Synced ${ok} playlist${ok === 1 ? '' : 's'}`);
+      if (upToDate > 0) parts.push(`${upToDate} already up to date`);
       if (busy > 0) parts.push(`${busy} already syncing (follow-up queued)`);
       this.updateWebhookEvent(eventId, 'synced', parts.join(', '));
     }

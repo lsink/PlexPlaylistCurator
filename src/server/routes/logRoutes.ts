@@ -8,7 +8,7 @@ const router = Router();
 router.get('/', requireAuth, (req, res) => {
   const limit = Math.min(Number(req.query.limit) || 50, 100);
   const logs = db
-    .prepare('SELECT * FROM sync_logs ORDER BY created_at DESC LIMIT ?')
+    .prepare('SELECT * FROM sync_logs ORDER BY created_at DESC, rowid DESC LIMIT ?')
     .all(limit);
 
   res.json(logs);

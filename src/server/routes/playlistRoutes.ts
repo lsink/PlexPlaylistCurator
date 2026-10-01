@@ -65,7 +65,7 @@ function syncPlaylistShows(playlistId: string, shows: any[]) {
 
 // List all playlists
 router.get('/', requireAuth, (req, res) => {
-  const playlists = db.prepare('SELECT * FROM playlists ORDER BY created_at DESC').all() as any[];
+  const playlists = db.prepare('SELECT * FROM playlists ORDER BY created_at DESC, rowid DESC').all() as any[];
 
   const allShows = db
     .prepare('SELECT * FROM playlist_shows ORDER BY sort_order ASC')
@@ -77,7 +77,7 @@ router.get('/', requireAuth, (req, res) => {
     else showsByPlaylist.set(s.playlist_id, [s]);
   }
 
-  const results = playlists.map(({ last_synced_queue, ...p }) => ({
+  const results = playlists.map(({ last_synced_queue, schedule_state, schedule_config, ...p }) => ({
     ...p,
     unwatchedOnly: Boolean(p.unwatched_only),
     includeSpecials: Boolean(p.include_specials),
@@ -210,7 +210,7 @@ router.get('/:id', requireAuth, (req, res) => {
       manualWeight: s.manual_weight,
     }));
 
-  const { last_synced_queue, ...playlistFields } = playlist;
+  const { last_synced_queue, schedule_state, schedule_config, ...playlistFields } = playlist;
   res.json({
     ...playlistFields,
     unwatchedOnly: Boolean(playlist.unwatched_only),

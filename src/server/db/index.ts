@@ -55,6 +55,13 @@ try {
   db.exec('ALTER TABLE playlists ADD COLUMN last_synced_queue TEXT');
 } catch {}
 
+try {
+  db.exec('ALTER TABLE playlists ADD COLUMN schedule_state TEXT');
+} catch {}
+try {
+  db.exec('ALTER TABLE playlists ADD COLUMN schedule_config TEXT');
+} catch {}
+
 // Existing playlists keep including specials (their previous behaviour); new playlists opt in explicitly
 try {
   db.exec('ALTER TABLE playlists ADD COLUMN include_specials INTEGER NOT NULL DEFAULT 1');

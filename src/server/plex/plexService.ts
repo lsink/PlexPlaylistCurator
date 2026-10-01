@@ -314,6 +314,20 @@ export class PlexService {
   }
 
   /**
+   * Rating keys of a playlist's items, in order. Null if it can't be read (e.g. it was deleted in Plex),
+   * which callers treat as "out of date" so the playlist gets rebuilt.
+   */
+  async getPlaylistItemKeys(playlistRatingKey: string): Promise<string[] | null> {
+    try {
+      const response = await this.client.get(`/playlists/${playlistRatingKey}/items`);
+      const items = response.data?.MediaContainer?.Metadata || [];
+      return items.map((item: any) => String(item.ratingKey));
+    } catch {
+      return null;
+    }
+  }
+
+  /**
    * Delete a playlist by ratingKey
    */
   async deletePlaylist(playlistRatingKey: string): Promise<boolean> {

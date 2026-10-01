@@ -88,7 +88,7 @@ export const api = {
     method: 'POST',
     body: JSON.stringify(data),
   }),
-  syncPlaylist: (id: string) => request<{ success: boolean; episodesSynced: number; plexPlaylistId: string }>(`/api/playlists/${id}/sync`, {
+  syncPlaylist: (id: string) => request<{ success: boolean; episodesSynced: number; plexPlaylistId: string; unchanged?: boolean }>(`/api/playlists/${id}/sync`, {
     method: 'POST',
   }),
   refreshPlaylistStats: (id: string) => request<{ success: boolean; shows: ShowItem[] }>(`/api/playlists/${id}/refresh-stats`, {
