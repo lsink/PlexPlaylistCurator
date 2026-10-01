@@ -475,7 +475,7 @@ describe('continueSchedule (rotation survives playlist rebuilds)', () => {
   // Repeatedly watch the first episode of the playlist and rebuild it, like the webhook does
   function watchAndRebuild(spec: Record<string, number>, options: InterleaveOptions, episodesToWatch: number, minutes?: Record<string, number>) {
     const watched: Record<string, number> = {};
-    let previous: { queue: string[]; state: SchedulerState } | null = null;
+    let previous: { queue: string[]; state: SchedulerState; positions: (SchedulerState | null)[] } | null = null;
     const order: string[] = [];
     let firstQueue: string[] = [];
     for (let i = 0; i < episodesToWatch; i++) {
@@ -485,7 +485,7 @@ describe('continueSchedule (rotation survives playlist rebuilds)', () => {
       if (!next) break;
       order.push(next.showRatingKey);
       watched[next.showRatingKey] = (watched[next.showRatingKey] || 0) + 1;
-      previous = { queue: result.episodes.map((e) => e.ratingKey), state: result.state };
+      previous = { queue: result.episodes.map((e) => e.ratingKey), state: result.state, positions: result.positions };
     }
     return { order, firstQueue };
   }
@@ -635,17 +635,41 @@ describe('changing the shows keeps the place in the rotation', () => {
     expect(next.episodes.filter((e) => e.showRatingKey === 'A').length).toBeGreaterThan(7); // now ~3:1
   });
 
-  it('data saved before per-episode positions existed: keeps the queue and adds the new show at its end', () => {
+  it('data saved before per-episode positions existed: still re-plans, keeping the episode that was up next', () => {
     const options: InterleaveOptions = { mode: 'round_robin', bufferSize: 6 };
     const first = continueSchedule([show('A', 0), show('B', 0), show('C', 0)], options, null);
+    // A-1 watched, then D added, with v1.4.15-style saved data (no positions)
     const next = continueSchedule([show('A', 1), show('B', 0), show('C', 0), show('D', 0)], options, {
       queue: keys(first.episodes),
       state: first.state,
       positions: null,
       replan: true,
     });
-    expect(next.replanned).toBe(false);
-    expect(keys(next.episodes).slice(0, 5)).toEqual(['B-1', 'C-1', 'A-2', 'B-2', 'C-2']);
+    expect(next.replanned).toBe(true);
+    expect(keys(next.episodes)).toEqual(['B-1', 'C-1', 'D-1', 'A-2', 'B-2', 'C-2']);
+  });
+
+  it('repairs a queue that left out a show added before positions were saved (v1.4.16 upgrade case)', () => {
+    // Full queue saved by v1.4.15 for four shows; a fifth show was added and saved without a re-plan,
+    // so the settings already include it (replan: false) but it has no place in the queue
+    const options: InterleaveOptions = { mode: 'manual_weighted', bufferSize: 30 };
+    const four = ['A', 'B', 'C', 'D'].map((k) => show(k, 0, 200));
+    const first = continueSchedule(four, options, null);
+    const legacy = { queue: keys(first.episodes), state: first.state, positions: null, replan: false };
+
+    const withNew = [...four, show('N', 0, 200)];
+    const repaired = continueSchedule(withNew, options, legacy);
+    expect(repaired.replanned).toBe(true);
+    expect(repaired.episodes[0].ratingKey).toBe(first.episodes[0].ratingKey); // same episode still up next
+    const firstNew = repaired.episodes.findIndex((e) => e.showRatingKey === 'N');
+    expect(firstNew).toBeGreaterThanOrEqual(0);
+    expect(firstNew).toBeLessThan(6);
+    expect(repaired.positions.every((p) => p !== null)).toBe(true); // full positions saved from now on
+
+    // The next sync continues normally (no repeated re-planning)
+    const again = continueSchedule(withNew, options, { queue: keys(repaired.episodes), state: repaired.state, positions: repaired.positions, replan: false });
+    expect(again.replanned).toBe(false);
+    expect(keys(again.episodes)).toEqual(keys(repaired.episodes));
   });
 });
 

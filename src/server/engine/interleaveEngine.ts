@@ -201,13 +201,22 @@ export function continueSchedule(
     keptCounts[i]++;
   }
 
-  if (previous.replan) {
-    // Where the rotation stands now: just before the first episode still to watch (or the end, if none are left)
-    const here = kept.length > 0 ? positionOf(kept[0].ratingKey) : previous.state;
-    if (here) {
-      return { ...interleaveWithState(shows, options, here), continued: true, replanned: true };
-    }
-    // Saved by an older version without per-episode positions: keep the queue and let new shows join at its end
+  // Queues saved by v1.4.15 have no per-episode positions. If such a queue leaves out a show that has episodes (a
+  // show added before the positions existed), re-plan once now; otherwise the new show could wait weeks for the
+  // old queue to drain. After this the positions are saved and the condition can't recur.
+  const missingPositions = kept.length > 0 && positionOf(kept[0].ratingKey) === null;
+  const showLeftOut = shows.some((show, i) => show.episodes.length > 0 && keptCounts[i] === 0);
+
+  if (previous.replan || (missingPositions && showLeftOut)) {
+    // Where the rotation stands now: just before the first episode still to watch (or the end, if none are left).
+    // Without a saved position, start from the saved end state but play the episode that was up next first.
+    const head = kept[0];
+    const here =
+      (head && positionOf(head.ratingKey)) ??
+      (head
+        ? { ...cloneState(previous.state), carry: { show: shows[showIndexByEpisode.get(head.ratingKey)!].ratingKey, remaining: 1 } }
+        : cloneState(previous.state));
+    return { ...interleaveWithState(shows, options, here), continued: true, replanned: true };
   }
 
   const bufferSize = options.bufferSize && options.bufferSize > 0 ? options.bufferSize : Infinity;
