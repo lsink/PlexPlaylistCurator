@@ -46,6 +46,15 @@ export class SyncService {
   private static syncingPlaylists = new Set<string>();
   private static pendingResync = new Set<string>();
 
+  // library.new debouncing: a library scan fires one event per added item, so wait for a quiet period and sync once.
+  // (Env overrides exist so the timing can be tested without waiting minutes.)
+  private static readonly LIBRARY_QUIET_MS = Number(process.env.LIBRARY_SYNC_DEBOUNCE_MS) || 30_000;
+  private static readonly LIBRARY_MAX_WAIT_MS = Number(process.env.LIBRARY_SYNC_MAX_WAIT_MS) || 5 * 60_000;
+  private static libraryPending = new Map<
+    string,
+    { timer: ReturnType<typeof setTimeout>; firstAt: number; count: number; showTitle: string | null; account: string | null; player: string | null }
+  >();
+
   private static readonly LOG_RETENTION_DAYS = 30;
   private static readonly LOG_MAX_ENTRIES = 500;
 
@@ -508,10 +517,118 @@ export class SyncService {
   }
 
   /**
+   * Playlists (enabled) that contain the given show
+   */
+  private static findPlaylistsForShow(showRatingKey: string): { id: string; name: string }[] {
+    return db
+      .prepare(
+        `SELECT DISTINCT p.id, p.name
+         FROM playlists p
+         JOIN playlist_shows ps ON p.id = ps.playlist_id
+         WHERE ps.plex_show_rating_key = ? AND p.enabled = 1`
+      )
+      .all(showRatingKey) as { id: string; name: string }[];
+  }
+
+  /**
+   * library.* events. Plex sends one per added item during a library scan, so they are NOT recorded or logged
+   * (they would drown out everything else), except when new content lands in a show that is in an enabled
+   * playlist: that schedules one debounced sync of the playlist so the queue picks up the new episodes.
+   */
+  private static handleLibraryEvent(event: string, payload: any): void {
+    if (event !== 'library.new') return;
+
+    const md = payload?.Metadata;
+    // Map whatever was added (episode, season or show) to its show
+    let showKey: unknown;
+    let showTitle: string | null = null;
+    if (md?.type === 'episode') {
+      showKey = md.grandparentRatingKey;
+      showTitle = md.grandparentTitle ?? null;
+    } else if (md?.type === 'season') {
+      showKey = md.parentRatingKey;
+      showTitle = md.parentTitle ?? null;
+    } else if (md?.type === 'show') {
+      showKey = md.ratingKey;
+      showTitle = md.title ?? null;
+    }
+    if (!showKey) return;
+
+    const playlists = this.findPlaylistsForShow(String(showKey));
+    if (playlists.length === 0) return;
+
+    const account: string | null = payload?.Account?.title ?? null;
+    const player: string | null = payload?.Player?.title ?? null;
+    const now = Date.now();
+
+    for (const p of playlists) {
+      const existing = this.libraryPending.get(p.id);
+      const firstAt = existing?.firstAt ?? now;
+      if (existing) clearTimeout(existing.timer);
+
+      // Quiet period after the latest event, but never later than MAX_WAIT after the first one
+      const delay = Math.max(0, Math.min(this.LIBRARY_QUIET_MS, firstAt + this.LIBRARY_MAX_WAIT_MS - now));
+      const timer = setTimeout(() => {
+        const entry = this.libraryPending.get(p.id);
+        this.libraryPending.delete(p.id);
+        if (entry) {
+          this.runLibrarySync(p.id, entry).catch((err) => console.error(`Library-triggered sync of ${p.id} failed:`, err));
+        }
+      }, delay);
+      timer.unref();
+
+      this.libraryPending.set(p.id, {
+        timer,
+        firstAt,
+        count: (existing?.count ?? 0) + 1,
+        showTitle: showTitle ?? existing?.showTitle ?? null,
+        account,
+        player,
+      });
+    }
+  }
+
+  private static async runLibrarySync(
+    playlistId: string,
+    entry: { count: number; showTitle: string | null; account: string | null; player: string | null }
+  ): Promise<void> {
+    const playlist = db.prepare('SELECT name FROM playlists WHERE id = ? AND enabled = 1').get(playlistId) as { name: string } | undefined;
+    if (!playlist) return; // deleted or disabled while waiting
+
+    const added = `${entry.count} new item${entry.count === 1 ? '' : 's'} added${entry.showTitle ? ` to "${entry.showTitle}"` : ''}`;
+    console.log(`[Webhook] library.new | ${entry.showTitle ?? '-'} -> syncing: ${added}; syncing ${playlist.name}`);
+    const eventId = this.recordWebhookEvent({
+      event: 'library.new',
+      showTitle: entry.showTitle,
+      account: entry.account,
+      player: entry.player,
+      outcome: 'syncing',
+      detail: `${added}; syncing ${playlist.name}`,
+    });
+
+    try {
+      await this.syncPlaylistById(playlistId, 'webhook');
+      this.updateWebhookEvent(eventId, 'synced', `${added}; synced ${playlist.name}`);
+    } catch (err: any) {
+      if (/already in progress/i.test(err?.message || '')) {
+        this.updateWebhookEvent(eventId, 'synced', `${added}; ${playlist.name} was already syncing (follow-up queued)`);
+      } else {
+        this.updateWebhookEvent(eventId, 'error', `${added}; ${playlist.name}: ${err?.message || 'sync failed'}`);
+      }
+    }
+  }
+
+  /**
    * Handle Plex Webhook event (instant scrobble sync)
    */
   public static async handleWebhook(payload: any): Promise<void> {
     const event: string | null = typeof payload?.event === 'string' ? payload.event : null;
+
+    if (event?.startsWith('library.')) {
+      this.handleLibraryEvent(event, payload);
+      return;
+    }
+
     const metadata = payload?.Metadata;
     const account: string | null = payload?.Account?.title ?? null;
     const player: string | null = payload?.Player?.title ?? null;
@@ -546,14 +663,7 @@ export class SyncService {
     const showRatingKey = String(rawRatingKey);
 
     // Find playlists containing this show
-    const matchingPlaylists = db
-      .prepare(
-        `SELECT DISTINCT p.id, p.name
-         FROM playlists p
-         JOIN playlist_shows ps ON p.id = ps.playlist_id
-         WHERE ps.plex_show_rating_key = ? AND p.enabled = 1`
-      )
-      .all(showRatingKey) as { id: string; name: string }[];
+    const matchingPlaylists = this.findPlaylistsForShow(showRatingKey);
 
     if (matchingPlaylists.length === 0) {
       note('no_playlist', `"${showTitle ?? showRatingKey}" is not in any enabled playlist`);
