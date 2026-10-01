@@ -19,14 +19,20 @@ function checkWebhookSecret(req: Request, res: Response, next: NextFunction) {
   if (!settings?.webhook_secret) return next();
 
   // Plex webhooks can't send custom headers, so also accept ?secret= in the URL
-  const provided = String(req.headers['x-webhook-secret'] || req.query.secret || '');
+  const headerSecret = req.headers['x-webhook-secret'];
+  const provided = String(headerSecret || req.query.secret || '');
   const a = Buffer.from(provided);
   const b = Buffer.from(settings.webhook_secret);
   const valid = a.length === b.length && timingSafeEqual(a, b);
   if (!valid) {
     const from = req.ip || req.socket.remoteAddress || 'unknown address';
-    console.warn(`[Webhook] rejected: invalid or missing secret (from ${from})`);
-    SyncService.recordWebhookEvent({ outcome: 'rejected', detail: `Invalid or missing webhook secret (from ${from})` });
+    // Say exactly what was wrong (the log is admin-only) so a misconfigured Plex webhook can be diagnosed.
+    // Only the secret's length is revealed, never its value.
+    const reason = !provided
+      ? `no secret in the request (query parameters received: ${Object.keys(req.query).join(', ') || 'none'})`
+      : `secret sent via ${headerSecret ? 'header' : 'URL'} does not match (sent ${provided.length} characters, expected ${settings.webhook_secret.length})`;
+    console.warn(`[Webhook] rejected from ${from}: ${reason}`);
+    SyncService.recordWebhookEvent({ outcome: 'rejected', detail: `${reason} - from ${from}` });
     return res.status(401).json({ error: 'Invalid webhook secret' });
   }
   next();
