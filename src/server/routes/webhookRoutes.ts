@@ -67,4 +67,17 @@ router.post('/plex', checkWebhookSecret, parseMultipartIfNeeded, async (req, res
   }
 });
 
+// Anything other than POST (e.g. someone opening the URL in a browser to test it) gets a clear explanation
+// instead of the generic "Endpoint not found". Deliberately independent of the webhook secret.
+router.all('/plex', (req, res) => {
+  res.setHeader('Allow', 'POST');
+  res.status(405).json({
+    error: 'Method not allowed',
+    message:
+      'This is the Plex webhook endpoint. It only accepts POST requests, which Plex sends automatically when ' +
+      'an episode finishes playing, so opening it in a browser will not do anything. ' +
+      'The endpoint is reachable. Check the Sync History in the dashboard to see webhook activity.',
+  });
+});
+
 export default router;
