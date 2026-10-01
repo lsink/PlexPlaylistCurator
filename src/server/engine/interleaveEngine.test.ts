@@ -561,3 +561,91 @@ describe('continueSchedule (rotation survives playlist rebuilds)', () => {
   });
 });
 
+describe('changing the shows keeps the place in the rotation', () => {
+  const show = (key: string, watched: number, total = 20, weight = 1): ShowConfig => ({
+    ratingKey: key,
+    title: key,
+    manualWeight: weight,
+    episodes: Array.from({ length: total - watched }, (_, i) => ({
+      ratingKey: `${key}-${watched + i + 1}`,
+      showRatingKey: key,
+      showTitle: key,
+      seasonNumber: 1,
+      episodeNumber: watched + i + 1,
+      title: '',
+    })),
+  });
+  const keys = (eps: { ratingKey: string }[]) => eps.map((e) => e.ratingKey);
+  const asPrevious = (r: { episodes: EpisodeItem[]; state: SchedulerState; positions: (SchedulerState | null)[] }, replan = true) => ({
+    queue: keys(r.episodes),
+    state: r.state,
+    positions: r.positions,
+    replan,
+  });
+
+  it('round-robin: an added show takes its turn right away, after the episode that was up next', () => {
+    const options: InterleaveOptions = { mode: 'round_robin', bufferSize: 6 };
+    const first = continueSchedule([show('A', 0), show('B', 0), show('C', 0)], options, null);
+    expect(keys(first.episodes)).toEqual(['A-1', 'B-1', 'C-1', 'A-2', 'B-2', 'C-2']);
+
+    // A-1 and B-1 watched, then show D added after C
+    const next = continueSchedule([show('A', 1), show('B', 1), show('C', 0), show('D', 0)], options, asPrevious(first));
+    expect(next.replanned).toBe(true);
+    expect(keys(next.episodes)).toEqual(['C-1', 'D-1', 'A-2', 'B-2', 'C-2', 'D-2']);
+  });
+
+  it('round-robin: a removed show is skipped without restarting the rotation', () => {
+    const options: InterleaveOptions = { mode: 'round_robin', bufferSize: 6 };
+    const first = continueSchedule([show('A', 0), show('B', 0), show('C', 0), show('D', 0)], options, null);
+    // A-1 and B-1 watched, then B removed
+    const next = continueSchedule([show('A', 1), show('C', 0), show('D', 0)], options, asPrevious(first));
+    expect(keys(next.episodes)).toEqual(['C-1', 'D-1', 'A-2', 'C-2', 'D-2', 'A-3']);
+  });
+
+  it('weighted modes: an added show is mixed into the upcoming queue, not parked at the end', () => {
+    const options: InterleaveOptions = { mode: 'manual_weighted', bufferSize: 30 };
+    const first = continueSchedule([show('A', 0, 200, 2), show('B', 0, 200, 1)], options, null);
+    const watchedA = keys(first.episodes.slice(0, 4)).filter((k) => k.startsWith('A')).length;
+    const watchedB = 4 - watchedA;
+    const previous = asPrevious(first);
+
+    const next = continueSchedule([show('A', watchedA, 200, 2), show('B', watchedB, 200, 1), show('N', 0, 200, 1)], options, previous);
+    expect(next.episodes[0].ratingKey).toBe(first.episodes[4].ratingKey); // picks up exactly where it was
+    const firstNew = next.episodes.findIndex((e) => e.showRatingKey === 'N');
+    expect(firstNew).toBeGreaterThanOrEqual(0);
+    expect(firstNew).toBeLessThan(5); // within the next few episodes, not after the 26 already queued
+    const share = next.episodes.filter((e) => e.showRatingKey === 'N').length / next.episodes.length;
+    expect(share).toBeGreaterThan(0.15); // ~1/4 of the rotation at weight 1 of 4
+    expect(share).toBeLessThan(0.35);
+  });
+
+  it('changing a weight keeps the place too', () => {
+    const options: InterleaveOptions = { mode: 'manual_weighted', bufferSize: 12 };
+    const first = continueSchedule([show('A', 0, 100, 1), show('B', 0, 100, 1)], options, null);
+    const watched = keys(first.episodes.slice(0, 3));
+    const next = continueSchedule(
+      [
+        show('A', watched.filter((k) => k.startsWith('A')).length, 100, 3),
+        show('B', watched.filter((k) => k.startsWith('B')).length, 100, 1),
+      ],
+      options,
+      asPrevious(first)
+    );
+    expect(next.episodes[0].ratingKey).toBe(first.episodes[3].ratingKey);
+    expect(next.episodes.filter((e) => e.showRatingKey === 'A').length).toBeGreaterThan(7); // now ~3:1
+  });
+
+  it('data saved before per-episode positions existed: keeps the queue and adds the new show at its end', () => {
+    const options: InterleaveOptions = { mode: 'round_robin', bufferSize: 6 };
+    const first = continueSchedule([show('A', 0), show('B', 0), show('C', 0)], options, null);
+    const next = continueSchedule([show('A', 1), show('B', 0), show('C', 0), show('D', 0)], options, {
+      queue: keys(first.episodes),
+      state: first.state,
+      positions: null,
+      replan: true,
+    });
+    expect(next.replanned).toBe(false);
+    expect(keys(next.episodes).slice(0, 5)).toEqual(['B-1', 'C-1', 'A-2', 'B-2', 'C-2']);
+  });
+});
+

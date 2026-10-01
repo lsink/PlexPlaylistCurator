@@ -5,7 +5,7 @@ import { api } from '../api/client';
 import { VirtualList } from './VirtualList';
 import { QueueDiffPanel } from './QueueDiffPanel';
 import { useModalA11y } from '../hooks/useModalA11y';
-import { getPosterUrl, formatDuration } from '../utils/format';
+import { getPosterUrl, formatDuration, formatFinish, formatPace } from '../utils/format';
 
 interface QueuePreviewModalProps {
   isOpen: boolean;
@@ -136,6 +136,11 @@ export const QueuePreviewModal: React.FC<QueuePreviewModalProps> = ({
                   <h4 className="text-xs font-semibold uppercase tracking-wider text-gray-400 mb-3">
                     Rotation Distribution & Pacing
                   </h4>
+                  {preview.watchRate ? (
+                    <p className="text-[11px] text-gray-500 -mt-2 mb-3">
+                      Finish dates assume your recent pace ({formatPace(preview.watchRate)} over the last 4 weeks) and this rotation.
+                    </p>
+                  ) : null}
                   <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
                     {preview.showStats.map((stat) => {
                       const showEpisodes = preview.episodes.filter(
@@ -171,6 +176,11 @@ export const QueuePreviewModal: React.FC<QueuePreviewModalProps> = ({
                               style={{ width: `${percentage}%` }}
                             ></div>
                           </div>
+                          {formatFinish(stat.estimatedFinish) && (
+                            <p className={`text-[10px] mt-1.5 ${stat.estimatedFinish === 'done' ? 'text-emerald-400' : 'text-gray-400'}`}>
+                              {formatFinish(stat.estimatedFinish)}
+                            </p>
+                          )}
                         </div>
                       );
                     })}

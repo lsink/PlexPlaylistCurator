@@ -81,6 +81,7 @@ router.get('/', requireAuth, (req, res) => {
     ...p,
     unwatchedOnly: Boolean(p.unwatched_only),
     includeSpecials: Boolean(p.include_specials),
+    watchRate: p.watch_rate ?? null,
     enabled: Boolean(p.enabled),
     consecutiveEpisodes: p.min_consecutive_episodes || p.consecutive_episodes || 1,
     minConsecutiveEpisodes: p.min_consecutive_episodes || p.consecutive_episodes || 1,
@@ -95,6 +96,7 @@ router.get('/', requireAuth, (req, res) => {
       unwatchedEpisodes: s.unwatched_episodes,
       sortOrder: s.sort_order,
       manualWeight: s.manual_weight,
+      estimatedFinish: s.estimated_finish ?? null,
     })),
   }));
 
@@ -208,6 +210,7 @@ router.get('/:id', requireAuth, (req, res) => {
       unwatchedEpisodes: s.unwatched_episodes,
       sortOrder: s.sort_order,
       manualWeight: s.manual_weight,
+      estimatedFinish: s.estimated_finish ?? null,
     }));
 
   const { last_synced_queue, schedule_state, schedule_config, ...playlistFields } = playlist;
@@ -215,6 +218,7 @@ router.get('/:id', requireAuth, (req, res) => {
     ...playlistFields,
     unwatchedOnly: Boolean(playlist.unwatched_only),
     includeSpecials: Boolean(playlist.include_specials),
+    watchRate: playlist.watch_rate ?? null,
     enabled: Boolean(playlist.enabled),
     consecutiveEpisodes: playlist.min_consecutive_episodes || playlist.consecutive_episodes || 1,
     minConsecutiveEpisodes: playlist.min_consecutive_episodes || playlist.consecutive_episodes || 1,

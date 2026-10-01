@@ -42,7 +42,23 @@ export interface SchedulerState {
 
 export interface ScheduleResult {
   episodes: EpisodeItem[];
+  /** Scheduler position after the last episode */
   state: SchedulerState;
+  /**
+   * Scheduler position just before each episode (same length as episodes). Starting a schedule from positions[i]
+   * plans the rotation onward from episode i, which is how a playlist is re-planned from the current point when
+   * its shows change. Null where unknown (data saved by an older version).
+   */
+  positions: (SchedulerState | null)[];
+}
+
+/** What a previous sync left behind, used to continue (or re-plan) the rotation */
+export interface PreviousSchedule {
+  queue: string[];
+  state: SchedulerState;
+  positions?: (SchedulerState | null)[] | null;
+  /** The playlist's shows, their order or weights changed: re-plan from the current position */
+  replan?: boolean;
 }
 
 const cloneState = (state: SchedulerState | null | undefined): SchedulerState => ({
@@ -103,13 +119,13 @@ export function interleaveWithState(
 ): ScheduleResult {
   const st = cloneState(state);
   if (!shows || shows.length === 0) {
-    return { episodes: [], state: st };
+    return { episodes: [], state: st, positions: [] };
   }
 
   // Filter shows with episodes and make copies of episode queues
   const activeShows = shows.filter((s) => s.episodes && s.episodes.length > 0);
   if (activeShows.length === 0) {
-    return { episodes: [], state: st };
+    return { episodes: [], state: st, positions: [] };
   }
 
   const bufferSize = options.bufferSize && options.bufferSize > 0 ? options.bufferSize : Infinity;
@@ -127,8 +143,11 @@ export function interleaveWithState(
       return interleaveAutoProportional(activeShows, bufferSize, minConsecutive, maxConsecutive, st);
     case 'manual_weighted':
       return interleaveManualWeighted(activeShows, bufferSize, minConsecutive, maxConsecutive, st);
-    case 'chronological':
-      return { episodes: interleaveChronological(activeShows, bufferSize), state: st };
+    case 'chronological': {
+      // Air-date order has no rotation to remember
+      const episodes = interleaveChronological(activeShows, bufferSize);
+      return { episodes, state: st, positions: episodes.map(() => cloneState(st)) };
+    }
     case 'runtime_balanced':
       return interleaveRuntimeBalanced(activeShows, bufferSize, minConsecutive, maxConsecutive, st);
     case 'round_robin':
@@ -145,6 +164,10 @@ export function interleaveWithState(
  * begin with the same show again. Instead: keep the previous queue's order, drop the episodes that are no longer
  * eligible (watched, removed), and fill the end by continuing the rotation from the saved scheduler state.
  *
+ * When the playlist's shows, their order or weights changed (previous.replan), the upcoming queue is re-planned
+ * from the current point in the rotation instead, so an added show is mixed in right away (rather than only after
+ * the whole current queue) and a removed show's turns go to the others, without starting the rotation over.
+ *
  * Falls back to a clean rebuild (continued: false) when there is nothing to continue, for chronological mode
  * (a global air-date order is already stable), or when a show's kept episodes are no longer the start of its
  * episode list (e.g. an earlier episode was marked unwatched, or a missing one was added to the library).
@@ -152,9 +175,9 @@ export function interleaveWithState(
 export function continueSchedule(
   shows: ShowConfig[],
   options: InterleaveOptions,
-  previous: { queue: string[]; state: SchedulerState } | null
-): ScheduleResult & { continued: boolean } {
-  const fresh = () => ({ ...interleaveWithState(shows, options, null), continued: false });
+  previous: PreviousSchedule | null
+): ScheduleResult & { continued: boolean; replanned: boolean } {
+  const fresh = () => ({ ...interleaveWithState(shows, options, null), continued: false, replanned: false });
   if (!previous || options.mode === 'chronological') return fresh();
 
   const showIndexByEpisode = new Map<string, number>();
@@ -165,6 +188,8 @@ export function continueSchedule(
       episodeByKey.set(ep.ratingKey, ep);
     })
   );
+  const previousIndex = new Map(previous.queue.map((key, i) => [key, i]));
+  const positionOf = (key: string) => previous.positions?.[previousIndex.get(key)!] ?? null;
 
   const kept = previous.queue.filter((key) => episodeByKey.has(key)).map((key) => episodeByKey.get(key)!);
 
@@ -176,14 +201,36 @@ export function continueSchedule(
     keptCounts[i]++;
   }
 
+  if (previous.replan) {
+    // Where the rotation stands now: just before the first episode still to watch (or the end, if none are left)
+    const here = kept.length > 0 ? positionOf(kept[0].ratingKey) : previous.state;
+    if (here) {
+      return { ...interleaveWithState(shows, options, here), continued: true, replanned: true };
+    }
+    // Saved by an older version without per-episode positions: keep the queue and let new shows join at its end
+  }
+
   const bufferSize = options.bufferSize && options.bufferSize > 0 ? options.bufferSize : Infinity;
+  const keptPositions = kept.map((ep) => positionOf(ep.ratingKey));
   if (kept.length >= bufferSize) {
-    return { episodes: kept.slice(0, bufferSize), state: cloneState(previous.state), continued: true };
+    return {
+      episodes: kept.slice(0, bufferSize),
+      state: cloneState(previous.state),
+      positions: keptPositions.slice(0, bufferSize),
+      continued: true,
+      replanned: false,
+    };
   }
 
   const rest = shows.map((show, i) => ({ ...show, episodes: show.episodes.slice(keptCounts[i]) }));
   const extension = interleaveWithState(rest, { ...options, bufferSize: bufferSize - kept.length }, previous.state);
-  return { episodes: [...kept, ...extension.episodes], state: extension.state, continued: true };
+  return {
+    episodes: [...kept, ...extension.episodes],
+    state: extension.state,
+    positions: [...keptPositions, ...extension.positions],
+    continued: true,
+    replanned: false,
+  };
 }
 
 /**
@@ -197,6 +244,7 @@ function interleaveRoundRobin(
 ): ScheduleResult {
   const queues = shows.map((s) => [...s.episodes]);
   const result: EpisodeItem[] = [];
+  const positions: SchedulerState[] = [];
   const n = shows.length;
   let carry: SchedulerState['carry'] = null;
 
@@ -206,6 +254,7 @@ function interleaveRoundRobin(
     if (j >= 0) {
       let emitted = 0;
       while (emitted < st.carry.remaining && queues[j].length > 0 && result.length < bufferSize) {
+        positions.push({ ...st, carry: { show: st.carry.show, remaining: st.carry.remaining - emitted } });
         result.push(queues[j].shift()!);
         emitted++;
       }
@@ -215,8 +264,13 @@ function interleaveRoundRobin(
     }
   }
 
+  // Next turn: the show after the one whose turn was being finished, in the *current* show order (so a show added
+  // or moved since the position was saved gets its proper turn); otherwise the saved next show
   let idx = 0;
-  if (st.nextShow) {
+  const carryIdx = st.carry ? shows.findIndex((s) => s.ratingKey === st.carry!.show) : -1;
+  if (carryIdx >= 0) {
+    idx = (carryIdx + 1) % n;
+  } else if (st.nextShow) {
     const j = shows.findIndex((s) => s.ratingKey === st.nextShow);
     if (j >= 0) idx = j;
   }
@@ -231,7 +285,10 @@ function interleaveRoundRobin(
     }
     emptyTurns = 0;
     let emitted = 0;
+    const after = shows[(idx + 1) % n].ratingKey;
     while (emitted < consecutiveEpisodes && queue.length > 0 && result.length < bufferSize) {
+      // Starting from here: finish this show's turn, then continue with the next show
+      positions.push({ ...st, nextShow: after, carry: { show: shows[idx].ratingKey, remaining: consecutiveEpisodes - emitted } });
       result.push(queue.shift()!);
       emitted++;
     }
@@ -241,7 +298,7 @@ function interleaveRoundRobin(
     idx = (idx + 1) % n;
   }
 
-  return { episodes: result, state: { ...st, nextShow: shows[idx].ratingKey, carry } };
+  return { episodes: result, state: { ...st, nextShow: shows[idx].ratingKey, carry }, positions };
 }
 
 /**
@@ -302,7 +359,15 @@ function executeSWRR(
   const queues = shows.map((s) => [...s.episodes]);
   const currentCredits = shows.map((s) => st.credits[s.ratingKey] ?? 0);
   const result: EpisodeItem[] = [];
+  const positions: SchedulerState[] = [];
   let carry: SchedulerState['carry'] = null;
+  const creditsNow = () => {
+    const credits = { ...st.credits };
+    shows.forEach((s, i) => {
+      credits[s.ratingKey] = currentCredits[i];
+    });
+    return credits;
+  };
 
   // Finish a batch that was cut short by the buffer last time (its turn was already paid for)
   if (st.carry) {
@@ -310,6 +375,7 @@ function executeSWRR(
     if (j >= 0) {
       let emitted = 0;
       while (emitted < st.carry.remaining && queues[j].length > 0 && result.length < bufferSize) {
+        positions.push({ ...st, credits: creditsNow(), carry: { show: st.carry.show, remaining: st.carry.remaining - emitted } });
         result.push(queues[j].shift()!);
         emitted++;
       }
@@ -358,9 +424,12 @@ function executeSWRR(
     // 5. Emit up to batchSizes[bestIdx] from bestIdx
     const countToEmit = batchSizes[bestIdx] || 1;
     let emitted = 0;
+    const turnCredits = creditsNow();
     for (let c = 0; c < countToEmit && queues[bestIdx].length > 0 && result.length < bufferSize; c++) {
       const ep = queues[bestIdx].shift();
       if (ep) {
+        // Starting from here: finish this show's turn (already paid for), then carry on with these credits
+        positions.push({ ...st, credits: turnCredits, carry: { show: shows[bestIdx].ratingKey, remaining: countToEmit - c } });
         result.push(ep);
         emitted++;
       }
@@ -370,11 +439,7 @@ function executeSWRR(
     }
   }
 
-  const credits = { ...st.credits };
-  shows.forEach((s, i) => {
-    credits[s.ratingKey] = currentCredits[i];
-  });
-  return { episodes: result, state: { ...st, credits, carry } };
+  return { episodes: result, state: { ...st, credits: creditsNow(), carry }, positions };
 }
 
 /**

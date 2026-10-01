@@ -4,3 +4,6 @@ data/
 *.log
 .env
 .DS_Store
+
+# compare-engine.ts temp copy of the old engine (normally deleted automatically)
+scripts/.engine-*.tmp.ts

@@ -5,7 +5,9 @@ import {
   continueSchedule,
   ShowConfig,
   InterleaveMode,
+  InterleaveOptions,
   SchedulerState,
+  PreviousSchedule,
 } from '../engine/interleaveEngine.js';
 
 export interface PlaylistRecord {
@@ -22,6 +24,7 @@ export interface PlaylistRecord {
   last_synced_queue?: string | null;
   schedule_state?: string | null;
   schedule_config?: string | null;
+  watch_rate?: number | null;
   include_specials?: number;
   consecutive_episodes?: number;
   min_consecutive_episodes?: number;
@@ -128,15 +131,32 @@ export class SyncService {
     });
   }
 
-  /** The last synced queue and rotation position, if they still apply to the playlist's current settings */
-  private static previousSchedule(playlist: PlaylistRecord, configKey: string): { queue: string[]; state: SchedulerState } | null {
-    if (playlist.schedule_config !== configKey || !playlist.last_synced_queue || !playlist.schedule_state) return null;
+  /**
+   * The last synced queue and rotation position, if they still apply.
+   * Changing the mode or other playlist settings starts the rotation over (returns null). Changing the shows, their
+   * order or weights keeps the place in the rotation and re-plans the upcoming queue from there (replan: true).
+   */
+  private static previousSchedule(playlist: PlaylistRecord, configKey: string): PreviousSchedule | null {
+    if (!playlist.schedule_config || !playlist.last_synced_queue || !playlist.schedule_state) return null;
     try {
+      const { shows: savedShows, ...savedSettings } = JSON.parse(playlist.schedule_config);
+      const { shows: currentShows, ...currentSettings } = JSON.parse(configKey);
+      if (JSON.stringify(savedSettings) !== JSON.stringify(currentSettings)) return null;
+
       const queue = (JSON.parse(playlist.last_synced_queue) as { ratingKey: string }[]).map((ep) => String(ep.ratingKey));
-      return { queue, state: JSON.parse(playlist.schedule_state) };
+      const saved = JSON.parse(playlist.schedule_state);
+      // v1.4.15 saved just the end state; later versions also save the position before each queued episode
+      const state: SchedulerState = saved?.end ?? saved;
+      const positions: (SchedulerState | null)[] | null = Array.isArray(saved?.positions) ? saved.positions : null;
+      return { queue, state, positions, replan: JSON.stringify(savedShows) !== JSON.stringify(currentShows) };
     } catch {
       return null;
     }
+  }
+
+  /** Saved form of the rotation position: the end state plus the position before each queued episode */
+  private static serializeSchedule(scheduled: { state: SchedulerState; positions: (SchedulerState | null)[] }): string {
+    return JSON.stringify({ end: scheduled.state, positions: scheduled.positions });
   }
 
   /** Build the queue, continuing the previous rotation where possible (see continueSchedule) */
@@ -144,12 +164,114 @@ export class SyncService {
     const configKey = this.scheduleConfigKey(playlist, shows);
     const minConsecutive = playlist.min_consecutive_episodes || playlist.consecutive_episodes || 1;
     const maxConsecutive = playlist.max_consecutive_episodes || minConsecutive;
-    const result = continueSchedule(
-      showConfigs,
-      { mode: playlist.mode, bufferSize: playlist.buffer_size, minConsecutive, maxConsecutive },
-      this.previousSchedule(playlist, configKey)
+    const options: InterleaveOptions = { mode: playlist.mode, bufferSize: playlist.buffer_size, minConsecutive, maxConsecutive };
+    const previous = this.previousSchedule(playlist, configKey);
+    const result = continueSchedule(showConfigs, options, previous);
+    return { ...result, configKey, options, previous };
+  }
+
+  /**
+   * Fetch each show's episodes (and watch history) for a sync or preview. Fails if any show can't be fetched,
+   * rather than silently building the playlist without it.
+   */
+  private static async fetchShowEpisodes(plex: PlexService, playlist: PlaylistRecord, shows: PlaylistShowRecord[]) {
+    const unwatchedOnly = playlist.unwatched_only === 1;
+    const results = await Promise.allSettled(
+      shows.map((show) => plex.getShowEpisodeData(show.plex_show_rating_key, unwatchedOnly))
     );
-    return { ...result, configKey };
+    const updateUnwatchedStmt = db.prepare(
+      'UPDATE playlist_shows SET unwatched_episodes = ? WHERE playlist_id = ? AND plex_show_rating_key = ?'
+    );
+
+    const showConfigs: ShowConfig[] = [];
+    const watchTimes: number[] = [];
+    shows.forEach((show, i) => {
+      const result = results[i];
+      if (result.status === 'rejected') {
+        throw new Error(`Failed to fetch episodes for "${show.show_title}": ${result.reason?.message || result.reason}`);
+      }
+      const episodes = this.applySpecialsFilter(result.value.episodes, playlist);
+      watchTimes.push(...result.value.watchTimes);
+      if (unwatchedOnly) {
+        try {
+          updateUnwatchedStmt.run(episodes.length, playlist.id, show.plex_show_rating_key);
+        } catch {}
+      }
+      showConfigs.push({
+        ratingKey: show.plex_show_rating_key,
+        title: show.show_title,
+        manualWeight: show.manual_weight,
+        episodes,
+      });
+    });
+    return { showConfigs, watchTimes };
+  }
+
+  private static readonly PACE_WINDOW_DAYS = 28;
+  private static readonly PACE_MIN_WATCHES = 3;
+
+  /**
+   * Estimated finish date per show. The pace is how many episodes of these shows were watched in the last 4 weeks
+   * (per Plex's watch history). Every remaining episode is then planned in rotation order, and a show is finished
+   * once its last episode comes up. In a mix that's more accurate than dividing each show's episode count by the
+   * pace, because short shows run out early. Only meaningful when the playlist advances as you watch
+   * (unwatched-only); returns no pace when there's too little recent watching to go on.
+   */
+  private static estimateFinish(
+    playlist: PlaylistRecord,
+    showConfigs: ShowConfig[],
+    watchTimes: number[],
+    scheduled: { options: InterleaveOptions; previous: PreviousSchedule | null }
+  ): { watchRate: number | null; finish: Record<string, string | null> } {
+    const finish: Record<string, string | null> = {};
+    showConfigs.forEach((show) => {
+      finish[show.ratingKey] = playlist.unwatched_only === 1 && show.episodes.length === 0 ? 'done' : null;
+    });
+    if (playlist.unwatched_only !== 1) return { watchRate: null, finish };
+
+    const now = Date.now();
+    const day = 24 * 60 * 60 * 1000;
+    const recent = watchTimes.filter((t) => t >= now - this.PACE_WINDOW_DAYS * day && t <= now + day).length;
+    if (recent < this.PACE_MIN_WATCHES) return { watchRate: null, finish };
+    const perDay = recent / this.PACE_WINDOW_DAYS;
+
+    // Plan the whole remaining rotation (no buffer limit), continuing from the same point as the queue
+    const plan = continueSchedule(showConfigs, { ...scheduled.options, bufferSize: 0 }, scheduled.previous).episodes;
+    const showOf = new Map<string, string>();
+    showConfigs.forEach((show) => show.episodes.forEach((ep) => showOf.set(ep.ratingKey, show.ratingKey)));
+    const lastPosition = new Map<string, number>();
+    plan.forEach((ep, i) => lastPosition.set(showOf.get(ep.ratingKey) ?? ep.showRatingKey, i));
+
+    for (const show of showConfigs) {
+      const position = lastPosition.get(show.ratingKey);
+      if (position !== undefined) {
+        finish[show.ratingKey] = new Date(now + ((position + 1) / perDay) * day).toISOString().slice(0, 10);
+      }
+    }
+    return { watchRate: perDay, finish };
+  }
+
+  private static saveEstimates(playlistId: string, estimate: { watchRate: number | null; finish: Record<string, string | null> }) {
+    db.prepare('UPDATE playlists SET watch_rate = ? WHERE id = ?').run(estimate.watchRate, playlistId);
+    const stmt = db.prepare('UPDATE playlist_shows SET estimated_finish = ? WHERE playlist_id = ? AND plex_show_rating_key = ?');
+    for (const [showKey, date] of Object.entries(estimate.finish)) stmt.run(date, playlistId, showKey);
+  }
+
+  /** Estimates are a nice-to-have: never let them break a sync or preview */
+  private static updateEstimates(
+    playlist: PlaylistRecord,
+    showConfigs: ShowConfig[],
+    watchTimes: number[],
+    scheduled: { options: InterleaveOptions; previous: PreviousSchedule | null }
+  ) {
+    try {
+      const estimate = this.estimateFinish(playlist, showConfigs, watchTimes, scheduled);
+      this.saveEstimates(playlist.id, estimate);
+      return estimate;
+    } catch (err) {
+      console.error(`Failed to estimate finish dates for ${playlist.name}:`, err);
+      return { watchRate: null, finish: {} as Record<string, string | null> };
+    }
   }
 
   /**
@@ -284,55 +406,27 @@ export class SyncService {
     }
 
     const plex = this.getPlexService();
-    const showConfigs: ShowConfig[] = [];
-    const showStats: any[] = [];
-
-    const updateUnwatchedStmt = db.prepare(
-      'UPDATE playlist_shows SET unwatched_episodes = ? WHERE playlist_id = ? AND plex_show_rating_key = ?'
-    );
-
-    const unwatchedOnly = playlist.unwatched_only === 1;
-    const episodeResults = await Promise.allSettled(
-      shows.map((show) => plex.getShowEpisodes(show.plex_show_rating_key, unwatchedOnly))
-    );
-
-    for (let i = 0; i < shows.length; i++) {
-      const show = shows[i];
-      const result = episodeResults[i];
-      if (result.status === 'rejected') {
-        throw new Error(`Failed to fetch episodes for "${show.show_title}": ${result.reason?.message || result.reason}`);
-      }
-      const episodes = this.applySpecialsFilter(result.value, playlist);
-
-      if (unwatchedOnly) {
-        try {
-          updateUnwatchedStmt.run(episodes.length, playlistId, show.plex_show_rating_key);
-        } catch {}
-      }
-
-      showConfigs.push({
-        ratingKey: show.plex_show_rating_key,
-        title: show.show_title,
-        manualWeight: show.manual_weight,
-        episodes,
-      });
-
-      showStats.push({
-        ratingKey: show.plex_show_rating_key,
-        title: show.show_title,
-        thumb: show.show_thumb,
-        manualWeight: show.manual_weight,
-        episodeCount: episodes.length,
-      });
-    }
+    const { showConfigs, watchTimes } = await this.fetchShowEpisodes(plex, playlist, shows);
 
     // Same continuation logic as the next sync, so the preview shows exactly what would be pushed
-    const queue = this.buildQueue(playlist, shows, showConfigs).episodes;
+    const scheduled = this.buildQueue(playlist, shows, showConfigs);
+    const queue = scheduled.episodes;
+    const estimate = this.updateEstimates(playlist, showConfigs, watchTimes, scheduled);
+
+    const showStats = shows.map((show, i) => ({
+      ratingKey: show.plex_show_rating_key,
+      title: show.show_title,
+      thumb: show.show_thumb,
+      manualWeight: show.manual_weight,
+      episodeCount: showConfigs[i].episodes.length,
+      estimatedFinish: estimate.finish[show.plex_show_rating_key] ?? null,
+    }));
 
     return {
       episodes: queue,
       showStats,
       totalEpisodesInQueue: queue.length,
+      watchRate: estimate.watchRate,
       diff: this.buildQueueDiff(playlist, queue),
     };
   }
@@ -395,42 +489,13 @@ export class SyncService {
       }
 
       const plex = this.getPlexService();
-      const showConfigs: ShowConfig[] = [];
-      const updateUnwatchedStmt = db.prepare(
-        'UPDATE playlist_shows SET unwatched_episodes = ? WHERE playlist_id = ? AND plex_show_rating_key = ?'
-      );
-
-      const syncUnwatchedOnly = playlist.unwatched_only === 1;
-      const syncEpisodeResults = await Promise.allSettled(
-        shows.map((show) => plex.getShowEpisodes(show.plex_show_rating_key, syncUnwatchedOnly))
-      );
-
-      for (let i = 0; i < shows.length; i++) {
-        const show = shows[i];
-        const result = syncEpisodeResults[i];
-        if (result.status === 'rejected') {
-          throw new Error(`Failed to fetch episodes for "${show.show_title}": ${result.reason?.message || result.reason}`);
-        }
-        const episodes = this.applySpecialsFilter(result.value, playlist);
-
-        if (syncUnwatchedOnly) {
-          try {
-            updateUnwatchedStmt.run(episodes.length, playlistId, show.plex_show_rating_key);
-          } catch {}
-        }
-
-        showConfigs.push({
-          ratingKey: show.plex_show_rating_key,
-          title: show.show_title,
-          manualWeight: show.manual_weight,
-          episodes,
-        });
-      }
+      const { showConfigs, watchTimes } = await this.fetchShowEpisodes(plex, playlist, shows);
 
       const scheduled = this.buildQueue(playlist, shows, showConfigs);
       const queue = scheduled.episodes;
       const episodeRatingKeys = queue.map((ep) => ep.ratingKey);
-      const scheduleState = JSON.stringify(scheduled.state);
+      const scheduleState = this.serializeSchedule(scheduled);
+      this.updateEstimates(playlist, showConfigs, watchTimes, scheduled);
 
       if (await this.isPlexPlaylistCurrent(plex, playlist, episodeRatingKeys)) {
         db.prepare(

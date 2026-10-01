@@ -257,13 +257,25 @@ export class PlexService {
    * Episodes are strictly sorted by Season ascending, then Episode ascending.
    */
   async getShowEpisodes(showRatingKey: string, unwatchedOnly = true): Promise<EpisodeItem[]> {
+    return (await this.getShowEpisodeData(showRatingKey, unwatchedOnly)).episodes;
+  }
+
+  /**
+   * Episodes (as getShowEpisodes) plus when each watched episode was last watched (ms timestamps),
+   * from the same request. The timestamps give the recent watching pace used for finish estimates.
+   */
+  async getShowEpisodeData(showRatingKey: string, unwatchedOnly = true): Promise<{ episodes: EpisodeItem[]; watchTimes: number[] }> {
     const response = await this.client.get(`/library/metadata/${showRatingKey}/allLeaves`);
     const metadata = response.data?.MediaContainer?.Metadata || [];
 
     const episodes: EpisodeItem[] = [];
+    const watchTimes: number[] = [];
 
     for (const item of metadata) {
       const viewCount = item.viewCount || 0;
+      if (viewCount > 0 && typeof item.lastViewedAt === 'number') {
+        watchTimes.push(item.lastViewedAt * 1000);
+      }
       if (unwatchedOnly && viewCount > 0) {
         continue;
       }
@@ -289,7 +301,7 @@ export class PlexService {
       return a.episodeNumber - b.episodeNumber;
     });
 
-    return episodes;
+    return { episodes, watchTimes };
   }
 
   /**

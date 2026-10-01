@@ -12,6 +12,8 @@ export interface ShowItem {
   unwatchedEpisodes?: number;
   sortOrder?: number;
   manualWeight?: number;
+  /** 'done', an estimated finish date (YYYY-MM-DD), or null when there's no estimate */
+  estimatedFinish?: string | null;
 }
 
 export interface Playlist {
@@ -23,6 +25,8 @@ export interface Playlist {
   buffer_size: number;
   unwatchedOnly: boolean;
   includeSpecials?: boolean;
+  /** Episodes per day watched from these shows over the last 4 weeks; null when there's too little to go on */
+  watchRate?: number | null;
   consecutiveEpisodes?: number;
   minConsecutiveEpisodes?: number;
   maxConsecutiveEpisodes?: number;
@@ -68,8 +72,10 @@ export interface PreviewData {
     thumb?: string;
     manualWeight?: number;
     episodeCount: number;
+    estimatedFinish?: string | null;
   }>;
   totalEpisodesInQueue: number;
+  watchRate?: number | null;
   diff?: SyncDiff;
 }
 

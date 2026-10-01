@@ -30,6 +30,7 @@ CREATE TABLE IF NOT EXISTS playlists (
   last_synced_queue TEXT,
   schedule_state TEXT,
   schedule_config TEXT,
+  watch_rate REAL,
   created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
@@ -45,6 +46,7 @@ CREATE TABLE IF NOT EXISTS playlist_shows (
   unwatched_episodes INTEGER,
   sort_order INTEGER NOT NULL DEFAULT 0,
   manual_weight REAL NOT NULL DEFAULT 1,
+  estimated_finish TEXT,
   created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
   FOREIGN KEY (playlist_id) REFERENCES playlists (id) ON DELETE CASCADE
 );

@@ -62,6 +62,13 @@ try {
   db.exec('ALTER TABLE playlists ADD COLUMN schedule_config TEXT');
 } catch {}
 
+try {
+  db.exec('ALTER TABLE playlists ADD COLUMN watch_rate REAL');
+} catch {}
+try {
+  db.exec('ALTER TABLE playlist_shows ADD COLUMN estimated_finish TEXT');
+} catch {}
+
 // Existing playlists keep including specials (their previous behaviour); new playlists opt in explicitly
 try {
   db.exec('ALTER TABLE playlists ADD COLUMN include_specials INTEGER NOT NULL DEFAULT 1');

@@ -7,15 +7,18 @@ An automated, production-ready Node.js application designed to run smoothly on a
 ## ✨ Features
 
 - **Sequential Interleaving**: Always preserves strictly sequential order within each show ($S01E01 \rightarrow S01E02 \rightarrow S01E03 \dots$) while rotating between different series.
+- **A Rotation That Keeps Its Place**: Every sync continues the rotation where it left off, so finishing an episode moves on to the next show instead of starting over. Adding, removing or re-weighting a show mixes the change into the upcoming queue without restarting the rotation.
 - **Auto-Proportional Pacing (Smooth Weighted Round-Robin)**: Automatically derives weights from remaining episode counts so shorter shows (e.g., a 10-episode miniseries) don't run out right away when mixed with 100+ episode long-runners. Episodes are smoothly distributed across the timeline.
 - **Manual Weight Overrides**: Customize the rotation rhythm by assigning weight multipliers to specific shows (e.g. 2 sitcoms for every 1 drama).
 - **Chronological Air Date Interleaving**: Cross-orders episodes across multiple shows by their original air dates—ideal for shared universes (Marvel Defenders, Star Trek, Arrowverse, Doctor Who).
-- **Unwatched-Only Filtering**: Automatically keeps only upcoming unwatched episodes in the rotation.
+- **Unwatched-Only Filtering**: Automatically keeps only upcoming unwatched episodes in the rotation, with a per-playlist option to include or skip Specials (Season 0).
+- **Finish Estimates**: Shows roughly when you'll finish each show, based on your watching pace over the last 4 weeks and the playlist's rotation.
 - **One-Click "Mark as Unwatched"**: Reset watch status for entire shows directly from the dashboard via the Plex unscrobble API.
 - **Rolling Window Buffer**: Caps Plex playlists to a configurable buffer (e.g. 25–50 upcoming episodes) to prevent Plex client lag, automatically replenishing as you watch.
-- **Real-Time Plex Webhook Sync**: Provides an instant `/api/webhook/plex` endpoint. When an episode finishes playing (`media.scrobble`), the playlist advances immediately.
-- **Automated Background Scheduler**: Built-in cron scheduler periodically synchronizes all playlists without manual intervention.
-- **Live Visual Queue Preview**: Inspect the exact calculated sequence and show distribution ratios before syncing to Plex.
+- **Real-Time Plex Webhook Sync**: When an episode finishes playing (`media.scrobble`), the playlist advances immediately. When Plex adds new episodes to a show in a playlist (`library.new`), the playlist re-syncs once the library scan settles. A **Webhook activity** log shows every event Plex sends and what the app did with it.
+- **Automated Background Scheduler**: Periodically synchronizes all playlists (any interval, or off). Syncs that find nothing new leave the Plex playlist untouched, so pins and favorites in Plex keep working.
+- **Live Visual Queue Preview**: Inspect the exact sequence the next sync will push, the show distribution, and what changed since the last sync.
+- **Backup & Restore**: Export and import playlist configurations as JSON from Settings.
 - **Ultra-Lightweight**: Single Node.js service (< 100MB RAM), embedded SQLite database (zero external database configuration).
 - **Security & Multi-Playlist Support**: Create unlimited curated playlists, view audit sync logs, and secure the interface with an administrative password.
 
@@ -131,14 +134,18 @@ Logins are stored in the app's SQLite database, so you stay signed in across res
 5. Click **Test Plex Connection** to verify that your TV libraries are detected.
 6. Click **Save Settings**.
 
-### 2. Setting Up Real-Time Webhooks (Optional for Plex Pass)
+### 2. Setting Up Real-Time Webhooks (Optional, needs Plex Pass)
 To make playlists advance instantly when you finish an episode:
-1. In Plex Web, navigate to **Settings** &rarr; **Webhooks** &rarr; **Add Webhook**.
-2. Paste the Webhook URL shown in your settings modal:
+1. In the app, open **Settings**. Optionally generate a **webhook secret** and save, so only Plex can trigger syncs.
+2. Copy the **Webhook URL** shown there. With a secret it ends in the secret, e.g.
    ```text
-   http://<YOUR-APP-IP>:32500/api/webhook/plex
+   http://<YOUR-APP-IP>:32500/api/webhook/plex/<your-secret>
    ```
-3. Whenever an episode finishes playing (`media.scrobble`), the app instantly identifies all active playlists containing that show and recalculates the rotation.
+   Use exactly this form: Plex drops anything after a `?` in webhook URLs, so a `?secret=` URL won't work from Plex.
+3. In Plex Web, open your **Account Settings** &rarr; **Webhooks** &rarr; **Add Webhook** and paste the URL. Keep only one entry pointing at the app.
+4. Play or pause an episode, then open **Sync History** &rarr; **Webhook activity** in the app. Every event Plex sends appears there with the Plex account and player, and why it did or didn't trigger a sync (for example *Rejected* means the secret in the URL is wrong or missing).
+
+When an episode finishes (`media.scrobble`, at about 90% watched), every enabled playlist containing that show is re-synced. New episodes added to such a show (`library.new`) trigger one re-sync about 30 seconds after the library scan goes quiet.
 
 ---
 
@@ -166,7 +173,7 @@ All playlist configurations, settings, and sync history logs are stored in a sin
 ```
 data/app.db
 ```
-To back up or migrate your installation, simply copy the `data/app.db` file (and its `-wal`/`-shm` companion files).
+To back up or migrate your installation, copy the `data/app.db` file (and its `-wal`/`-shm` companion files) together with `data/session-secret` (the generated key that signs login cookies). To move just your playlist configurations, use **Settings** &rarr; **Backup & Restore**.
 
 ---
 
@@ -179,9 +186,15 @@ npm install
 # Run backend unit tests
 npm test
 
+# Type-check client and server
+npx tsc --noEmit -p tsconfig.json
+npx tsc --noEmit -p tsconfig.server.json
+
 # Run development server (concurrent backend and frontend with HMR)
 npm run dev
 ```
+
+No Plex server handy? `node scripts/mock-plex.mjs` starts a small mock Plex (three shows) to point the app at, and `scripts/e2e/` has end-to-end checks that run against it. See [AGENTS.md](AGENTS.md) for the architecture and how to run them.
 
 ---
 

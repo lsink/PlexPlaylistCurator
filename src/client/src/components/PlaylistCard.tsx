@@ -14,7 +14,7 @@ import {
   AlertCircle,
 } from 'lucide-react';
 import { Playlist, InterleaveMode } from '../types';
-import { getPosterUrl, parseDbTimestamp } from '../utils/format';
+import { getPosterUrl, parseDbTimestamp, formatFinish, formatPace } from '../utils/format';
 
 interface PlaylistCardProps {
   playlist: Playlist;
@@ -189,11 +189,33 @@ const PlaylistCardComponent: React.FC<PlaylistCardProps> = ({
                           Weight: {show.manualWeight || 1}x
                         </p>
                       )}
+                      {formatFinish(show.estimatedFinish) && (
+                        <p
+                          className={`text-[10px] ${show.estimatedFinish === 'done' ? 'text-emerald-400' : 'text-gray-400'}`}
+                          title="Estimated from your watching pace and this playlist's rotation"
+                        >
+                          {formatFinish(show.estimatedFinish)}
+                        </p>
+                      )}
                     </div>
                   </div>
                 );
               })}
             </div>
+          )}
+          {playlist.unwatchedOnly && playlist.shows.length > 0 && playlist.last_synced_at && (
+            <p className="text-[11px] text-gray-500 mt-2">
+              {playlist.watchRate
+                ? (() => {
+                    const dates = playlist.shows
+                      .map((s) => s.estimatedFinish)
+                      .filter((d): d is string => !!d && d !== 'done')
+                      .sort();
+                    const last = dates.length > 0 ? formatFinish(dates[dates.length - 1]) : null;
+                    return `Your pace: ${formatPace(playlist.watchRate)} over the last 4 weeks${last ? ` · all shows ${last.replace(/^Done/, 'done')}` : ''}`;
+                  })()
+                : 'Finish estimates appear once you have watched a few episodes of these shows in the last 4 weeks.'}
+            </p>
           )}
         </div>
       </div>
