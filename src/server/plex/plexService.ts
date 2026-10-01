@@ -31,8 +31,10 @@ export class PlexService {
   private baseUrl: string;
   private token: string;
   private machineIdentifier: string = '';
+  // Shared across instances (a new PlexService is created per sync) so the ID is only fetched once per server URL
+  private static machineIdCache = new Map<string, string>();
 
-  constructor(url: string, token: string) {
+  constructor(url: string, token: string, clientIdentifier?: string) {
     let cleanUrl = url.trim();
     if (!cleanUrl.startsWith('http://') && !cleanUrl.startsWith('https://')) {
       cleanUrl = `http://${cleanUrl}`;
@@ -42,6 +44,7 @@ export class PlexService {
 
     this.baseUrl = cleanUrl;
     this.token = token.trim();
+    this.machineIdentifier = PlexService.machineIdCache.get(this.baseUrl) || '';
 
     this.client = axios.create({
       baseURL: this.baseUrl,
@@ -49,7 +52,7 @@ export class PlexService {
       headers: {
         'X-Plex-Token': this.token,
         'Accept': 'application/json',
-        'X-Plex-Client-Identifier': 'plex-playlist-creator-proxmox',
+        'X-Plex-Client-Identifier': clientIdentifier || 'plex-playlist-creator-proxmox',
         'X-Plex-Product': 'Plex Interleaved Playlist Creator',
         'X-Plex-Version': '1.0.0',
         'X-Plex-Device': 'Proxmox LXC',
@@ -60,10 +63,6 @@ export class PlexService {
 
   public getBaseUrl(): string {
     return this.baseUrl;
-  }
-
-  public getToken(): string {
-    return this.token;
   }
 
   /**
@@ -77,6 +76,7 @@ export class PlexService {
     }
 
     this.machineIdentifier = container.machineIdentifier || '';
+    if (this.machineIdentifier) PlexService.machineIdCache.set(this.baseUrl, this.machineIdentifier);
 
     // Fetch friendly name and version from root
     let friendlyName = 'Plex Server';
@@ -328,22 +328,6 @@ export class PlexService {
 
     const machineId = await this.getMachineIdentifier();
 
-    // If an existing playlist ID is provided, delete it to ensure exact ordered rebuild
-    if (existingPlexPlaylistId) {
-      await this.deletePlaylist(existingPlexPlaylistId);
-    } else {
-      // Also check if a playlist with this exact title already exists
-      try {
-        const existingList = await this.getPlaylists();
-        const found = existingList.find((p: any) => p.title === playlistTitle);
-        if (found) {
-          await this.deletePlaylist(String(found.ratingKey));
-        }
-      } catch {
-        // Ignore error
-      }
-    }
-
     // Step 1: Create playlist with first item
     const firstKey = episodeRatingKeys[0];
     const firstUri = `server://${machineId}/com.plexapp.plugins.library/library/metadata/${firstKey}`;
@@ -364,38 +348,63 @@ export class PlexService {
 
     const newPlaylistRatingKey = String(createdMetadata.ratingKey);
 
-    // Step 2: Append remaining items in batches
-    // Plex accepts a comma-separated uri param; batch to avoid URL length limits
-    const BATCH_SIZE = 50;
-    const remainingKeys = episodeRatingKeys.slice(1);
+    let added = 1; // the first item was added at creation
+    try {
+      // Step 2: Append remaining items in batches
+      // Plex accepts a comma-separated uri param; batch to avoid URL length limits
+      const BATCH_SIZE = 50;
+      const remainingKeys = episodeRatingKeys.slice(1);
 
-    for (let i = 0; i < remainingKeys.length; i += BATCH_SIZE) {
-      const batchKeys = remainingKeys.slice(i, i + BATCH_SIZE);
-      // Plex expects ONE server:// URI with comma-separated rating keys
-      const batchUri = `server://${machineId}/com.plexapp.plugins.library/library/metadata/${batchKeys.join(',')}`;
-      try {
-        await this.client.put(`/playlists/${newPlaylistRatingKey}/items`, null, {
-          params: { uri: batchUri },
-        });
-      } catch (err) {
-        console.error(`Error adding batch to playlist ${newPlaylistRatingKey}:`, err);
-        // Fall back to individual adds for this batch if batch fails
-        for (const key of batchKeys) {
-          try {
-            const itemUri = `server://${machineId}/com.plexapp.plugins.library/library/metadata/${key}`;
-            await this.client.put(`/playlists/${newPlaylistRatingKey}/items`, null, {
-              params: { uri: itemUri },
-            });
-          } catch (innerErr) {
-            console.error(`Error adding episode ${key} to playlist:`, innerErr);
+      for (let i = 0; i < remainingKeys.length; i += BATCH_SIZE) {
+        const batchKeys = remainingKeys.slice(i, i + BATCH_SIZE);
+        // Plex expects ONE server:// URI with comma-separated rating keys
+        const batchUri = `server://${machineId}/com.plexapp.plugins.library/library/metadata/${batchKeys.join(',')}`;
+        try {
+          await this.client.put(`/playlists/${newPlaylistRatingKey}/items`, null, {
+            params: { uri: batchUri },
+          });
+          added += batchKeys.length;
+        } catch (err) {
+          console.error(`Error adding batch to playlist ${newPlaylistRatingKey}:`, err);
+          // Fall back to individual adds for this batch if batch fails
+          for (const key of batchKeys) {
+            try {
+              const itemUri = `server://${machineId}/com.plexapp.plugins.library/library/metadata/${key}`;
+              await this.client.put(`/playlists/${newPlaylistRatingKey}/items`, null, {
+                params: { uri: itemUri },
+              });
+              added++;
+            } catch (innerErr) {
+              console.error(`Error adding episode ${key} to playlist:`, innerErr);
+            }
           }
         }
       }
+
+      // Step 3: Only now remove the old playlist(s), so a failure above never loses the original
+      const staleKeys = new Set<string>();
+      if (existingPlexPlaylistId) staleKeys.add(existingPlexPlaylistId);
+      try {
+        const existingList = await this.getPlaylists();
+        for (const p of existingList) {
+          if (p.title === playlistTitle) staleKeys.add(String(p.ratingKey));
+        }
+      } catch {
+        // Ignore error
+      }
+      staleKeys.delete(newPlaylistRatingKey);
+      for (const key of staleKeys) {
+        await this.deletePlaylist(key);
+      }
+    } catch (err) {
+      // Roll back the partial replacement; the original playlist is untouched
+      await this.deletePlaylist(newPlaylistRatingKey);
+      throw err;
     }
 
     return {
       plexPlaylistId: newPlaylistRatingKey,
-      count: episodeRatingKeys.length,
+      count: added,
     };
   }
 }

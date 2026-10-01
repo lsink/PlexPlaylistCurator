@@ -14,21 +14,18 @@ import {
   AlertCircle,
 } from 'lucide-react';
 import { Playlist, InterleaveMode } from '../types';
+import { getPosterUrl } from '../utils/format';
 
 interface PlaylistCardProps {
   playlist: Playlist;
-  plexUrl?: string;
-  plexToken?: string;
   onSync: (id: string) => Promise<void>;
   onPreview: (playlist: Playlist) => void;
   onEdit: (playlist: Playlist) => void;
   onDelete: (playlist: Playlist) => void;
 }
 
-export const PlaylistCard: React.FC<PlaylistCardProps> = ({
+const PlaylistCardComponent: React.FC<PlaylistCardProps> = ({
   playlist,
-  plexUrl,
-  plexToken,
   onSync,
   onPreview,
   onEdit,
@@ -86,11 +83,6 @@ export const PlaylistCard: React.FC<PlaylistCardProps> = ({
     }
   };
 
-  // Build thumbnail URL through backend Plex image proxy
-  const getPosterUrl = (thumb?: string | null) => {
-    if (!thumb) return null;
-    return `/api/plex/image?path=${encodeURIComponent(thumb)}`;
-  };
 
   return (
     <div className="bg-[#1e2226] border border-[#2f353c] hover:border-[#414952] rounded-xl p-5 shadow-lg transition-all flex flex-col justify-between">
@@ -237,3 +229,5 @@ export const PlaylistCard: React.FC<PlaylistCardProps> = ({
     </div>
   );
 };
+
+export const PlaylistCard = React.memo(PlaylistCardComponent);

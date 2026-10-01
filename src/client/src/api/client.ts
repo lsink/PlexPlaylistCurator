@@ -19,6 +19,10 @@ async function request<T>(url: string, options?: RequestInit): Promise<T> {
     }
     const error = new Error(errorMsg) as Error & { status?: number };
     error.status = res.status;
+    // Session expired mid-use: let the app re-prompt login (a failed login attempt itself is not an expiry)
+    if (res.status === 401 && !url.startsWith('/api/auth/')) {
+      window.dispatchEvent(new Event('auth-expired'));
+    }
     throw error;
   }
 
@@ -50,6 +54,7 @@ export const api = {
   }),
 
   // Plex
+  getPlexStatus: () => request<{ connected: boolean; serverName?: string; error?: string }>('/api/plex/status'),
   getLibraries: () => request<Array<{ key: string; title: string; type: string }>>('/api/plex/libraries'),
   getShows: (sectionKey: string) => request<ShowItem[]>(`/api/plex/shows?sectionKey=${sectionKey}`),
   getShowDetails: (ratingKey: string) => request<ShowItem>(`/api/plex/shows/${ratingKey}`),
@@ -74,6 +79,14 @@ export const api = {
     method: 'DELETE',
   }),
   getPreview: (id: string) => request<PreviewData>(`/api/playlists/${id}/preview`),
+  syncAllPlaylists: () => request<{ success: boolean; synced: number; failed: number }>('/api/playlists/sync-all', {
+    method: 'POST',
+  }),
+  exportPlaylists: () => request<{ version: number; playlists: any[] }>('/api/playlists/export'),
+  importPlaylists: (data: { playlists: any[] }) => request<{ success: boolean; imported: number }>('/api/playlists/import', {
+    method: 'POST',
+    body: JSON.stringify(data),
+  }),
   syncPlaylist: (id: string) => request<{ success: boolean; episodesSynced: number; plexPlaylistId: string }>(`/api/playlists/${id}/sync`, {
     method: 'POST',
   }),

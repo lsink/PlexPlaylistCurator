@@ -1,15 +1,15 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { X, Search, Check, Tv, AlertCircle } from 'lucide-react';
 import { ShowItem } from '../types';
 import { api } from '../api/client';
+import { useModalA11y } from '../hooks/useModalA11y';
+import { getPosterUrl } from '../utils/format';
 
 interface ShowPickerModalProps {
   isOpen: boolean;
   onClose: () => void;
   alreadySelectedKeys: string[];
   onAddShows: (shows: ShowItem[]) => void;
-  plexUrl?: string;
-  plexToken?: string;
 }
 
 export const ShowPickerModal: React.FC<ShowPickerModalProps> = ({
@@ -17,9 +17,8 @@ export const ShowPickerModal: React.FC<ShowPickerModalProps> = ({
   onClose,
   alreadySelectedKeys,
   onAddShows,
-  plexUrl,
-  plexToken,
 }) => {
+  const dialogRef = useRef<HTMLDivElement>(null);
   const [libraries, setLibraries] = useState<Array<{ key: string; title: string; type: string }>>([]);
   const [selectedLibraryKey, setSelectedLibraryKey] = useState<string>('');
   const [shows, setShows] = useState<ShowItem[]>([]);
@@ -27,44 +26,53 @@ export const ShowPickerModal: React.FC<ShowPickerModalProps> = ({
   const [selectedShows, setSelectedShows] = useState<Map<string, ShowItem>>(new Map());
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const alreadySelectedSet = useMemo(() => new Set(alreadySelectedKeys), [alreadySelectedKeys]);
+  // Guards against stale responses after the modal closes or the library changes mid-fetch
+  const showsRequestIdRef = useRef(0);
 
   useEffect(() => {
-    if (isOpen) {
-      loadLibraries();
-      setSelectedShows(new Map());
-      setSearchQuery('');
-    }
+    if (!isOpen) return;
+    loadLibraries();
+    setSelectedShows(new Map());
+    setSearchQuery('');
+    return () => {
+      showsRequestIdRef.current++;
+    };
   }, [isOpen]);
 
   const loadLibraries = async () => {
+    const requestId = ++showsRequestIdRef.current;
     try {
       setLoading(true);
       setError(null);
       const libs = await api.getLibraries();
+      if (requestId !== showsRequestIdRef.current) return;
       setLibraries(libs);
       if (libs.length > 0) {
         setSelectedLibraryKey(libs[0].key);
         loadShows(libs[0].key);
       } else {
         setShows([]);
+        setLoading(false);
       }
     } catch (err: any) {
+      if (requestId !== showsRequestIdRef.current) return;
       setError(err.message || 'Failed to load Plex TV libraries. Please check your Plex connection settings.');
-    } finally {
       setLoading(false);
     }
   };
 
   const loadShows = async (sectionKey: string) => {
+    const requestId = ++showsRequestIdRef.current;
     try {
       setLoading(true);
       setError(null);
       const list = await api.getShows(sectionKey);
-      setShows(list);
+      if (requestId === showsRequestIdRef.current) setShows(list);
     } catch (err: any) {
-      setError(err.message || 'Failed to fetch shows from Plex library.');
+      if (requestId === showsRequestIdRef.current) setError(err.message || 'Failed to fetch shows from Plex library.');
     } finally {
-      setLoading(false);
+      if (requestId === showsRequestIdRef.current) setLoading(false);
     }
   };
 
@@ -74,7 +82,7 @@ export const ShowPickerModal: React.FC<ShowPickerModalProps> = ({
   };
 
   const toggleSelectShow = (show: ShowItem) => {
-    if (alreadySelectedKeys.includes(show.ratingKey)) {
+    if (alreadySelectedSet.has(show.ratingKey)) {
       return; // Already added to playlist
     }
 
@@ -96,15 +104,19 @@ export const ShowPickerModal: React.FC<ShowPickerModalProps> = ({
     s.title.toLowerCase().includes(searchQuery.toLowerCase())
   );
 
-  const getPosterUrl = (thumb?: string | null) => {
-    if (!thumb) return null;
-    return `/api/plex/image?path=${encodeURIComponent(thumb)}`;
-  };
+
+  useModalA11y(dialogRef, isOpen, onClose);
 
   if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/75 backdrop-blur-sm animate-fade-in">
+    <div
+      ref={dialogRef}
+      role="dialog"
+      aria-modal="true"
+      aria-label="Add shows"
+      className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/75 backdrop-blur-sm animate-fade-in"
+    >
       <div className="bg-[#1b1e22] border border-[#2e343b] rounded-2xl w-full max-w-4xl max-h-[85vh] flex flex-col shadow-2xl overflow-hidden">
         {/* Header */}
         <div className="px-6 py-4 border-b border-[#2e343b] flex items-center justify-between">
@@ -178,14 +190,25 @@ export const ShowPickerModal: React.FC<ShowPickerModalProps> = ({
           ) : (
             <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3 sm:gap-4">
               {filteredShows.map((show) => {
-                const isAlreadyIn = alreadySelectedKeys.includes(show.ratingKey);
+                const isAlreadyIn = alreadySelectedSet.has(show.ratingKey);
                 const isSelected = selectedShows.has(show.ratingKey);
                 const posterUrl = getPosterUrl(show.thumb);
 
                 return (
                   <div
                     key={show.ratingKey}
+                    role="checkbox"
+                    aria-checked={isAlreadyIn || isSelected}
+                    aria-disabled={isAlreadyIn}
+                    aria-label={isAlreadyIn ? `${show.title} (already in playlist)` : show.title}
+                    tabIndex={isAlreadyIn ? -1 : 0}
                     onClick={() => toggleSelectShow(show)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' || e.key === ' ') {
+                        e.preventDefault();
+                        toggleSelectShow(show);
+                      }
+                    }}
                     className={`relative rounded-xl border overflow-hidden transition-all text-left flex flex-col justify-between ${
                       isAlreadyIn
                         ? 'opacity-40 border-gray-700 bg-[#16181b] cursor-not-allowed'

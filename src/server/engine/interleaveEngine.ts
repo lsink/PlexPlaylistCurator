@@ -241,8 +241,8 @@ function interleaveChronological(shows: ShowConfig[], bufferSize: number): Episo
   }
 
   allEpisodes.sort((a, b) => {
-    const dateA = a.airDate || '9999-99-99';
-    const dateB = b.airDate || '9999-99-99';
+    const dateA = a.airDate || '9999-12-31';
+    const dateB = b.airDate || '9999-12-31';
     if (dateA !== dateB) {
       return dateA.localeCompare(dateB);
     }

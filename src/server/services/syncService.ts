@@ -38,13 +38,36 @@ export interface PlaylistShowRecord {
 
 export class SyncService {
   private static isSyncing = false;
+  private static syncingPlaylists = new Set<string>();
+  private static pendingResync = new Set<string>();
+
+  private static readonly LOG_RETENTION_DAYS = 30;
+  private static readonly LOG_MAX_ENTRIES = 500;
+
+  /** Keep sync_logs bounded: drop entries older than 30 days or beyond the newest 500 */
+  public static pruneLogs(): void {
+    try {
+      db.prepare(`DELETE FROM sync_logs WHERE created_at < datetime('now', ?)`).run(`-${this.LOG_RETENTION_DAYS} days`);
+      db.prepare(
+        `DELETE FROM sync_logs WHERE id NOT IN (SELECT id FROM sync_logs ORDER BY created_at DESC LIMIT ?)`
+      ).run(this.LOG_MAX_ENTRIES);
+    } catch (err) {
+      console.error('Failed to prune sync logs:', err);
+    }
+  }
 
   public static getPlexService(): PlexService {
     const settings = db.prepare('SELECT * FROM settings WHERE id = 1').get() as any;
     if (!settings || !settings.plex_url || !settings.plex_token) {
       throw new Error('Plex server settings are not configured yet.');
     }
-    return new PlexService(settings.plex_url, settings.plex_token);
+    // Each install gets its own stable client identifier so multiple instances don't collide in Plex's device registry
+    let clientId: string = settings.plex_client_id;
+    if (!clientId) {
+      clientId = `plex-playlist-creator-${randomUUID()}`;
+      db.prepare('UPDATE settings SET plex_client_id = ? WHERE id = 1').run(clientId);
+    }
+    return new PlexService(settings.plex_url, settings.plex_token, clientId);
   }
 
   /**
@@ -194,6 +217,30 @@ export class SyncService {
     playlistId: string,
     triggerType: 'manual' | 'cron' | 'webhook' = 'manual'
   ): Promise<any> {
+    if (this.syncingPlaylists.has(playlistId)) {
+      // A watch event mid-sync means the queue is already stale; remember to run once more afterwards
+      if (triggerType === 'webhook') this.pendingResync.add(playlistId);
+      throw new Error('A sync is already in progress for this playlist.');
+    }
+
+    this.syncingPlaylists.add(playlistId);
+    try {
+      return await this.runPlaylistSync(playlistId, triggerType);
+    } finally {
+      this.syncingPlaylists.delete(playlistId);
+      this.pruneLogs();
+      if (this.pendingResync.delete(playlistId)) {
+        this.syncPlaylistById(playlistId, 'webhook').catch((err) =>
+          console.error(`Follow-up sync for playlist ${playlistId} failed:`, err)
+        );
+      }
+    }
+  }
+
+  private static async runPlaylistSync(
+    playlistId: string,
+    triggerType: 'manual' | 'cron' | 'webhook'
+  ): Promise<any> {
     const logId = randomUUID();
     const playlist = db.prepare('SELECT * FROM playlists WHERE id = ?').get(playlistId) as PlaylistRecord | undefined;
     if (!playlist) {
@@ -334,7 +381,7 @@ export class SyncService {
     triggerType: 'manual' | 'cron' | 'webhook' = 'cron'
   ): Promise<{ synced: number; failed: number }> {
     if (this.isSyncing) {
-      console.log('Sync already in progress, skipping concurrent run.');
+      console.log('Sync-all already in progress, skipping concurrent run.');
       return { synced: 0, failed: 0 };
     }
 
@@ -347,13 +394,12 @@ export class SyncService {
         .prepare('SELECT id FROM playlists WHERE enabled = 1')
         .all() as { id: string }[];
 
-      for (const p of enabledPlaylists) {
-        try {
-          await this.syncPlaylistById(p.id, triggerType);
-          synced++;
-        } catch (err) {
-          failed++;
-        }
+      const results = await Promise.allSettled(
+        enabledPlaylists.map((p) => this.syncPlaylistById(p.id, triggerType))
+      );
+      for (const r of results) {
+        if (r.status === 'fulfilled') synced++;
+        else failed++;
       }
     } finally {
       this.isSyncing = false;

@@ -4,6 +4,17 @@ import { requireAuth } from '../middleware/auth.js';
 
 const router = Router();
 
+// Lightweight connection health check (used by the navbar status dot)
+router.get('/status', requireAuth, async (req, res) => {
+  try {
+    const plex = SyncService.getPlexService();
+    const info = await plex.testConnection();
+    res.json({ connected: true, serverName: info.friendlyName });
+  } catch (err: any) {
+    res.json({ connected: false, error: err.message || 'Plex unreachable' });
+  }
+});
+
 // Get TV Show libraries
 router.get('/libraries', requireAuth, async (req, res) => {
   try {

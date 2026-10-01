@@ -19,6 +19,7 @@ import { SyncLogsModal } from './components/SyncLogsModal';
 import { LoginModal } from './components/LoginModal';
 import { Playlist, SettingsData } from './types';
 import { api } from './api/client';
+import { useConfirm } from './components/ConfirmDialog';
 
 export const App: React.FC = () => {
   const [playlists, setPlaylists] = useState<Playlist[]>([]);
@@ -33,6 +34,8 @@ export const App: React.FC = () => {
   const [syncingAll, setSyncingAll] = useState(false);
   const [toastMessage, setToastMessage] = useState<{ text: string; type: 'success' | 'error' } | null>(null);
   const toastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const confirm = useConfirm();
+  const [plexConnected, setPlexConnected] = useState<boolean | null>(null);
 
   // Modals
   const [settingsOpen, setSettingsOpen] = useState(false);
@@ -62,6 +65,41 @@ export const App: React.FC = () => {
       if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
     };
   }, []);
+
+  // Session expired while the app was open (any API call returned 401)
+  useEffect(() => {
+    const onExpired = () => {
+      setAuthStatus((prev) => (prev ? { ...prev, isAuthenticated: false } : prev));
+      setLoginOpen(true);
+    };
+    window.addEventListener('auth-expired', onExpired);
+    return () => window.removeEventListener('auth-expired', onExpired);
+  }, []);
+
+  // Plex connection health indicator
+  const plexConfigured = Boolean(settings?.isConfigured);
+  const authenticated = Boolean(authStatus?.isAuthenticated);
+  useEffect(() => {
+    if (!plexConfigured || !authenticated) {
+      setPlexConnected(null);
+      return;
+    }
+    let cancelled = false;
+    const check = async () => {
+      try {
+        const res = await api.getPlexStatus();
+        if (!cancelled) setPlexConnected(res.connected);
+      } catch {
+        if (!cancelled) setPlexConnected(false);
+      }
+    };
+    check();
+    const timer = setInterval(check, 45000);
+    return () => {
+      cancelled = true;
+      clearInterval(timer);
+    };
+  }, [plexConfigured, authenticated]);
 
   const checkAuthAndLoad = async () => {
     try {
@@ -136,25 +174,22 @@ export const App: React.FC = () => {
   const handleSyncAll = useCallback(async () => {
     setSyncingAll(true);
     try {
-      // Run all enabled playlist syncs in parallel
-      const enabledPlaylists = playlists.filter((p) => p.enabled);
-      const results = await Promise.allSettled(
-        enabledPlaylists.map((p) => api.syncPlaylist(p.id))
-      );
-      const total = results.reduce((acc, r) =>
-        r.status === 'fulfilled' ? acc + (r.value?.episodesSynced ?? 0) : acc, 0
-      );
-      const failed = results.filter((r) => r.status === 'rejected').length;
+      const { synced, failed } = await api.syncAllPlaylists();
       const msg = failed > 0
-        ? `Sync done: ${total} episodes updated, ${failed} playlist(s) failed`
-        : `Finished syncing all playlists (${total} episodes updated)`;
+        ? `Sync done: ${synced} playlist(s) updated, ${failed} failed`
+        : `Finished syncing ${synced} playlist(s)`;
       showToast(msg, failed > 0 ? 'error' : 'success');
-      const updated = await api.getPlaylists();
-      setPlaylists(updated);
+    } catch (err: any) {
+      showToast(err.message || 'Sync failed', 'error');
     } finally {
+      try {
+        setPlaylists(await api.getPlaylists());
+      } catch {
+        // Keep the list we have if the refresh fails
+      }
       setSyncingAll(false);
     }
-  }, [playlists, showToast]);
+  }, [showToast]);
 
   // Errors propagate to PlaylistEditorModal, which shows them inline and stays open
   const handleSavePlaylist = useCallback(async (data: any, shouldSyncNow = false) => {
@@ -179,9 +214,15 @@ export const App: React.FC = () => {
   }, [activePlaylist, showToast]);
 
   const handleDeletePlaylist = useCallback(async (playlist: Playlist) => {
-    const deleteFromPlex = confirm(
-      `Delete playlist "${playlist.name}"?\n\nClick OK to also remove the playlist from your Plex server.\nClick Cancel to only remove it from this app.`
-    );
+    const choice = await confirm({
+      title: `Delete "${playlist.name}"?`,
+      message: 'Choose whether to also remove the playlist from your Plex server, or only from this app.',
+      confirmLabel: 'Delete and remove from Plex',
+      secondaryLabel: 'Delete from app only',
+      destructive: true,
+    });
+    if (choice === 'cancel') return;
+    const deleteFromPlex = choice === 'confirm';
 
     try {
       await api.deletePlaylist(playlist.id, deleteFromPlex);
@@ -191,17 +232,21 @@ export const App: React.FC = () => {
     } catch (err: any) {
       showToast(err.message || 'Failed to delete playlist', 'error');
     }
-  }, [showToast]);
+  }, [confirm, showToast]);
 
   const openEditorForNew = useCallback(() => {
     if (!settings?.isConfigured) {
-      alert('Please connect to your Plex server in Settings first.');
-      setSettingsOpen(true);
+      confirm({
+        title: 'Connect to Plex first',
+        message: 'Please connect to your Plex server in Settings before creating a playlist.',
+        confirmLabel: 'Open Settings',
+        hideCancel: true,
+      }).then(() => setSettingsOpen(true));
       return;
     }
     setActivePlaylist(null);
     setEditorOpen(true);
-  }, [settings?.isConfigured]);
+  }, [settings?.isConfigured, confirm]);
 
   const openEditorForEdit = useCallback((playlist: Playlist) => {
     setActivePlaylist(playlist);
@@ -222,6 +267,7 @@ export const App: React.FC = () => {
         onNewPlaylist={openEditorForNew}
         onLogout={handleLogout}
         hasPassword={authStatus?.hasPassword}
+        plexConnected={plexConnected}
       />
 
       {/* Toast Notification */}
@@ -330,7 +376,6 @@ export const App: React.FC = () => {
               <PlaylistCard
                 key={playlist.id}
                 playlist={playlist}
-                plexUrl={settings?.plexUrl}
                 onSync={handleSyncPlaylist}
                 onPreview={openPreview}
                 onEdit={openEditorForEdit}
@@ -353,7 +398,6 @@ export const App: React.FC = () => {
         playlist={activePlaylist}
         onSave={handleSavePlaylist}
         onPreview={openPreview}
-        plexUrl={settings?.plexUrl}
       />
 
       <QueuePreviewModal
@@ -361,7 +405,6 @@ export const App: React.FC = () => {
         onClose={() => setPreviewOpen(false)}
         playlist={activePlaylist}
         onSync={handleSyncPlaylist}
-        plexUrl={settings?.plexUrl}
       />
 
       <SettingsModal

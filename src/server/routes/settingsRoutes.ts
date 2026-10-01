@@ -48,6 +48,9 @@ router.post('/', requireAuth, async (req, res) => {
   }
 
   const interval = typeof autoSyncIntervalMinutes === 'number' ? autoSyncIntervalMinutes : 30;
+  if (!Number.isInteger(interval) || interval < 0 || interval > 1440) {
+    return res.status(400).json({ error: 'Auto-sync interval must be a whole number between 0 and 1440 minutes.' });
+  }
 
   db.prepare(
     `UPDATE settings SET 

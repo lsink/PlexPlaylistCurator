@@ -47,6 +47,10 @@ try {
   db.exec('ALTER TABLE playlist_shows ADD COLUMN unwatched_episodes INTEGER');
 } catch {}
 
+try {
+  db.exec("ALTER TABLE settings ADD COLUMN plex_client_id TEXT NOT NULL DEFAULT ''");
+} catch {}
+
 // Note: SQLite does not support ALTER COLUMN to change type.
 // manual_weight column stores REAL values correctly even if schema shows INTEGER (SQLite is type-flexible).
 // New databases will use the REAL type declared in the schema above.

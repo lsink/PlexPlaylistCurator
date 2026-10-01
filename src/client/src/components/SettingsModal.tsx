@@ -1,19 +1,20 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   X,
   Server,
-  Key,
   Clock,
   Radio,
   CheckCircle2,
   AlertCircle,
   Copy,
-  ExternalLink,
   Shield,
   HelpCircle,
+  Download,
+  Upload,
 } from 'lucide-react';
 import { SettingsData } from '../types';
 import { api } from '../api/client';
+import { useModalA11y } from '../hooks/useModalA11y';
 
 interface SettingsModalProps {
   isOpen: boolean;
@@ -26,6 +27,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   onClose,
   onSaved,
 }) => {
+  const dialogRef = useRef<HTMLDivElement>(null);
   const [plexUrl, setPlexUrl] = useState('');
   const [plexToken, setPlexToken] = useState('');
   const [hasToken, setHasToken] = useState(false);
@@ -46,26 +48,68 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   const [saveSuccess, setSaveSuccess] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [copiedWebhook, setCopiedWebhook] = useState(false);
+  const [settingsLoaded, setSettingsLoaded] = useState(false);
+  const [backupMessage, setBackupMessage] = useState<{ text: string; ok: boolean } | null>(null);
+  const importInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
-    if (isOpen) {
-      loadSettings();
-      setTestResult(null);
-      setSaveSuccess(false);
-      setError(null);
-    }
+    if (!isOpen) return;
+    let cancelled = false;
+    setSettingsLoaded(false);
+    setTestResult(null);
+    setSaveSuccess(false);
+    setError(null);
+    setBackupMessage(null);
+    loadSettings(() => cancelled);
+    return () => {
+      cancelled = true;
+    };
   }, [isOpen]);
 
-  const loadSettings = async () => {
+  const loadSettings = async (isCancelled: () => boolean) => {
     try {
       const data = await api.getSettings();
+      if (isCancelled()) return;
       setAppVersion(data.appVersion || '1.0.0');
       setPlexUrl(data.plexUrl || 'http://192.168.1.100:32400');
       setMaskedToken(data.plexTokenMasked || '');
       setHasToken(data.hasToken);
       setAutoSyncInterval(data.autoSyncIntervalMinutes ?? 30);
+      setSettingsLoaded(true);
     } catch (err: any) {
-      setError(err.message || 'Failed to load settings');
+      if (!isCancelled()) setError(err.message || 'Failed to load settings');
+    }
+  };
+
+  const handleExport = async () => {
+    setBackupMessage(null);
+    try {
+      const data = await api.exportPlaylists();
+      const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `plex-playlist-curator-backup-${new Date().toISOString().slice(0, 10)}.json`;
+      a.click();
+      URL.revokeObjectURL(url);
+      setBackupMessage({ text: `Exported ${data.playlists.length} playlist(s).`, ok: true });
+    } catch (err: any) {
+      setBackupMessage({ text: err.message || 'Export failed', ok: false });
+    }
+  };
+
+  const handleImportFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file) return;
+    setBackupMessage(null);
+    try {
+      const parsed = JSON.parse(await file.text());
+      const res = await api.importPlaylists(parsed);
+      setBackupMessage({ text: `Imported ${res.imported} playlist(s). They were added alongside your existing ones.`, ok: true });
+      onSaved();
+    } catch (err: any) {
+      setBackupMessage({ text: err.message || 'Import failed — is this a valid backup file?', ok: false });
     }
   };
 
@@ -155,10 +199,18 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
     }
   };
 
+  useModalA11y(dialogRef, isOpen, onClose);
+
   if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-6 bg-black/80 backdrop-blur-sm animate-fade-in">
+    <div
+      ref={dialogRef}
+      role="dialog"
+      aria-modal="true"
+      aria-label="Settings"
+      className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-6 bg-black/80 backdrop-blur-sm animate-fade-in"
+    >
       <div className="bg-[#1b1e22] border border-[#2e343b] rounded-2xl w-full max-w-2xl max-h-[90vh] flex flex-col shadow-2xl overflow-hidden">
         {/* Header */}
         <div className="px-6 py-4 border-b border-[#2e343b] flex items-center justify-between">
@@ -175,7 +227,13 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
         </div>
 
         {/* Content */}
-        <div className="flex-1 overflow-y-auto p-6 space-y-6">
+        <div className="flex-1 overflow-y-auto p-6 space-y-6" aria-busy={!settingsLoaded}>
+          {!settingsLoaded && !error && (
+            <div className="flex items-center gap-2 text-sm text-gray-400">
+              <div className="w-4 h-4 border-2 border-amber-500 border-t-transparent rounded-full animate-spin"></div>
+              <span>Loading current settings...</span>
+            </div>
+          )}
           {error && (
             <div className="p-3.5 rounded-xl bg-red-500/10 border border-red-500/30 text-red-400 text-sm">
               {error}
@@ -388,6 +446,48 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
 
           <hr className="border-[#2b3036]" />
 
+          {/* Section: Backup & Restore */}
+          <div className="space-y-3">
+            <h3 className="text-xs font-bold uppercase tracking-wider text-amber-400 flex items-center gap-2">
+              <Download className="w-4 h-4" />
+              <span>Backup &amp; Restore Playlists</span>
+            </h3>
+            <p className="text-[11px] text-gray-500">
+              Export your playlist configurations to a JSON file, or import them into this (or another) install. Imports are added as new playlists and are not synced until you sync them.
+            </p>
+            <div className="flex flex-wrap gap-2">
+              <button
+                type="button"
+                onClick={handleExport}
+                className="flex items-center gap-1.5 px-3.5 py-2 rounded-lg bg-[#252a30] hover:bg-[#313740] border border-[#3a414b] text-xs text-gray-200 font-semibold cursor-pointer"
+              >
+                <Download className="w-3.5 h-3.5" />
+                <span>Export playlists</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => importInputRef.current?.click()}
+                className="flex items-center gap-1.5 px-3.5 py-2 rounded-lg bg-[#252a30] hover:bg-[#313740] border border-[#3a414b] text-xs text-gray-200 font-semibold cursor-pointer"
+              >
+                <Upload className="w-3.5 h-3.5" />
+                <span>Import playlists</span>
+              </button>
+              <input
+                ref={importInputRef}
+                type="file"
+                accept="application/json,.json"
+                onChange={handleImportFile}
+                className="hidden"
+                aria-label="Import playlists JSON file"
+              />
+            </div>
+            {backupMessage && (
+              <p className={`text-xs ${backupMessage.ok ? 'text-emerald-400' : 'text-red-400'}`}>{backupMessage.text}</p>
+            )}
+          </div>
+
+          <hr className="border-[#2b3036]" />
+
           {/* Section 5: Version & In-Container Updates */}
           <div className="bg-[#16181b] p-4 rounded-xl border border-[#2d3238] space-y-2">
             <div className="flex items-center justify-between">
@@ -416,7 +516,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
           </button>
           <button
             onClick={handleSave}
-            disabled={saving}
+            disabled={saving || !settingsLoaded}
             className="px-5 py-2 rounded-lg bg-amber-500 hover:bg-amber-400 disabled:opacity-50 text-sm font-semibold text-black transition-colors shadow-md shadow-amber-500/10 cursor-pointer"
           >
             {saving ? 'Saving...' : 'Save Settings'}

@@ -1,6 +1,7 @@
-import React, { useState } from 'react';
+import React, { useState, useRef } from 'react';
 import { Lock, KeyRound, Play } from 'lucide-react';
 import { api } from '../api/client';
+import { useModalA11y } from '../hooks/useModalA11y';
 
 interface LoginModalProps {
   isOpen: boolean;
@@ -11,6 +12,7 @@ export const LoginModal: React.FC<LoginModalProps> = ({
   isOpen,
   onSuccess,
 }) => {
+  const dialogRef = useRef<HTMLDivElement>(null);
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -34,10 +36,18 @@ export const LoginModal: React.FC<LoginModalProps> = ({
     }
   };
 
+  useModalA11y(dialogRef, isOpen);
+
   if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/85 backdrop-blur-md animate-fade-in">
+    <div
+      ref={dialogRef}
+      role="dialog"
+      aria-modal="true"
+      aria-label="Sign in"
+      className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/85 backdrop-blur-md animate-fade-in"
+    >
       <div className="bg-[#1b1e22] border border-[#2e343b] rounded-2xl w-full max-w-md p-6 sm:p-8 shadow-2xl text-center">
         <div className="w-14 h-14 rounded-2xl bg-amber-500/20 border border-amber-500/30 text-amber-400 flex items-center justify-center mx-auto mb-4 shadow-lg shadow-amber-500/10">
           <Lock className="w-6 h-6" />

@@ -6,13 +6,69 @@ import { requireAuth } from '../middleware/auth.js';
 
 const router = Router();
 
+const VALID_MODES = ['round_robin', 'auto_proportional', 'manual_weighted', 'chronological', 'runtime_balanced'];
+
+/** Shared by create and update: replace playlist_shows with a diff so existing rows keep their IDs */
+function syncPlaylistShows(playlistId: string, shows: any[]) {
+  const existingRows = db
+    .prepare('SELECT id, plex_show_rating_key FROM playlist_shows WHERE playlist_id = ?')
+    .all(playlistId) as { id: string; plex_show_rating_key: string }[];
+  const existingByKey = new Map(existingRows.map((r) => [r.plex_show_rating_key, r.id]));
+
+  const seen = new Set<string>();
+  const incoming = shows.filter((show: any) => {
+    const key = String(show.ratingKey);
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+
+  const deleteStmt = db.prepare('DELETE FROM playlist_shows WHERE id = ?');
+  for (const row of existingRows) {
+    if (!seen.has(row.plex_show_rating_key)) deleteStmt.run(row.id);
+  }
+
+  const insertStmt = db.prepare(
+    `INSERT INTO playlist_shows (id, playlist_id, plex_show_rating_key, show_title, show_thumb, season_count, total_episodes, unwatched_episodes, sort_order, manual_weight)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+  );
+  const updateStmt = db.prepare(
+    `UPDATE playlist_shows SET show_title = ?, show_thumb = ?, season_count = ?, total_episodes = ?, unwatched_episodes = ?, sort_order = ?, manual_weight = ? WHERE id = ?`
+  );
+
+  incoming.forEach((show: any, index: number) => {
+    const key = String(show.ratingKey);
+    const values = [
+      show.title,
+      show.thumb || null,
+      typeof show.seasonCount === 'number' ? show.seasonCount : null,
+      typeof show.totalEpisodes === 'number' ? show.totalEpisodes : null,
+      typeof show.unwatchedEpisodes === 'number' ? show.unwatchedEpisodes : null,
+      show.sortOrder ?? index,
+      typeof show.manualWeight === 'number' && show.manualWeight > 0 ? show.manualWeight : 1,
+    ];
+    const existingId = existingByKey.get(key);
+    if (existingId) {
+      updateStmt.run(...values, existingId);
+    } else {
+      insertStmt.run(randomUUID(), playlistId, key, ...values);
+    }
+  });
+}
+
 // List all playlists
 router.get('/', requireAuth, (req, res) => {
   const playlists = db.prepare('SELECT * FROM playlists ORDER BY created_at DESC').all() as any[];
 
-  const getShowsStmt = db.prepare(
-    'SELECT * FROM playlist_shows WHERE playlist_id = ? ORDER BY sort_order ASC'
-  );
+  const allShows = db
+    .prepare('SELECT * FROM playlist_shows ORDER BY sort_order ASC')
+    .all() as any[];
+  const showsByPlaylist = new Map<string, any[]>();
+  for (const s of allShows) {
+    const list = showsByPlaylist.get(s.playlist_id);
+    if (list) list.push(s);
+    else showsByPlaylist.set(s.playlist_id, [s]);
+  }
 
   const results = playlists.map((p) => ({
     ...p,
@@ -21,7 +77,7 @@ router.get('/', requireAuth, (req, res) => {
     consecutiveEpisodes: p.min_consecutive_episodes || p.consecutive_episodes || 1,
     minConsecutiveEpisodes: p.min_consecutive_episodes || p.consecutive_episodes || 1,
     maxConsecutiveEpisodes: p.max_consecutive_episodes || p.min_consecutive_episodes || p.consecutive_episodes || 1,
-    shows: getShowsStmt.all(p.id).map((s: any) => ({
+    shows: (showsByPlaylist.get(p.id) || []).map((s: any) => ({
       id: s.id,
       ratingKey: s.plex_show_rating_key,
       title: s.show_title,
@@ -35,6 +91,86 @@ router.get('/', requireAuth, (req, res) => {
   }));
 
   res.json(results);
+});
+
+// Sync all enabled playlists in parallel (server-side)
+router.post('/sync-all', requireAuth, async (req, res) => {
+  try {
+    const result = await SyncService.syncAllPlaylists('manual');
+    res.json({ success: true, ...result });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message || 'Sync failed' });
+  }
+});
+
+// Export all playlist configs as JSON (backup)
+router.get('/export', requireAuth, (req, res) => {
+  const playlists = db.prepare('SELECT * FROM playlists ORDER BY created_at ASC').all() as any[];
+  const shows = db.prepare('SELECT * FROM playlist_shows ORDER BY sort_order ASC').all() as any[];
+  const data = playlists.map((p) => ({
+    name: p.name,
+    plexPlaylistTitle: p.plex_playlist_title,
+    mode: p.mode,
+    bufferSize: p.buffer_size,
+    unwatchedOnly: Boolean(p.unwatched_only),
+    minConsecutiveEpisodes: p.min_consecutive_episodes || p.consecutive_episodes || 1,
+    maxConsecutiveEpisodes: p.max_consecutive_episodes || p.min_consecutive_episodes || 1,
+    enabled: Boolean(p.enabled),
+    shows: shows
+      .filter((s) => s.playlist_id === p.id)
+      .map((s) => ({
+        ratingKey: s.plex_show_rating_key,
+        title: s.show_title,
+        thumb: s.show_thumb,
+        seasonCount: s.season_count,
+        totalEpisodes: s.total_episodes,
+        unwatchedEpisodes: s.unwatched_episodes,
+        sortOrder: s.sort_order,
+        manualWeight: s.manual_weight,
+      })),
+  }));
+  res.json({ version: 1, exportedAt: new Date().toISOString(), playlists: data });
+});
+
+// Import playlist configs from an export (always creates new playlists)
+router.post('/import', requireAuth, (req, res) => {
+  const list = req.body?.playlists;
+  if (!Array.isArray(list)) {
+    return res.status(400).json({ error: 'Invalid import file: "playlists" array is missing.' });
+  }
+
+  const importTx = db.transaction(() => {
+    for (const p of list) {
+      if (!p?.name || typeof p.name !== 'string') throw new Error('Each playlist needs a name.');
+      const mode = VALID_MODES.includes(p.mode) ? p.mode : 'auto_proportional';
+      const min = typeof p.minConsecutiveEpisodes === 'number' && p.minConsecutiveEpisodes > 0 ? p.minConsecutiveEpisodes : 1;
+      const max = typeof p.maxConsecutiveEpisodes === 'number' && p.maxConsecutiveEpisodes >= min ? p.maxConsecutiveEpisodes : min;
+      const id = randomUUID();
+      db.prepare(
+        `INSERT INTO playlists (id, name, plex_playlist_title, mode, buffer_size, unwatched_only, consecutive_episodes, min_consecutive_episodes, max_consecutive_episodes, enabled)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      ).run(
+        id,
+        p.name.trim(),
+        (p.plexPlaylistTitle || p.name).trim(),
+        mode,
+        typeof p.bufferSize === 'number' ? p.bufferSize : 30,
+        p.unwatchedOnly === false ? 0 : 1,
+        min,
+        min,
+        max,
+        p.enabled === false ? 0 : 1
+      );
+      if (Array.isArray(p.shows)) syncPlaylistShows(id, p.shows.filter((s: any) => s?.ratingKey && s?.title));
+    }
+  });
+
+  try {
+    importTx();
+    res.json({ success: true, imported: list.length });
+  } catch (err: any) {
+    res.status(400).json({ error: err.message || 'Import failed' });
+  }
 });
 
 // Get single playlist
@@ -90,6 +226,10 @@ router.post('/', requireAuth, async (req, res) => {
     return res.status(400).json({ error: 'Playlist name is required' });
   }
 
+  if (mode !== undefined && !VALID_MODES.includes(mode)) {
+    return res.status(400).json({ error: `Invalid mode. Must be one of: ${VALID_MODES.join(', ')}` });
+  }
+
   const playlistId = randomUUID();
   const title = plexPlaylistTitle?.trim() || name.trim();
   const selectedMode = mode || 'auto_proportional';
@@ -110,25 +250,7 @@ router.post('/', requireAuth, async (req, res) => {
     ).run(playlistId, name.trim(), title, selectedMode, buffer, isUnwatchedOnly, minConsecutive, minConsecutive, maxConsecutive, isEnabled);
 
     if (Array.isArray(shows)) {
-      const insertShowStmt = db.prepare(
-        `INSERT INTO playlist_shows (id, playlist_id, plex_show_rating_key, show_title, show_thumb, season_count, total_episodes, unwatched_episodes, sort_order, manual_weight)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-      );
-
-      shows.forEach((show: any, index: number) => {
-        insertShowStmt.run(
-          randomUUID(),
-          playlistId,
-          String(show.ratingKey),
-          show.title,
-          show.thumb || null,
-          typeof show.seasonCount === 'number' ? show.seasonCount : null,
-          typeof show.totalEpisodes === 'number' ? show.totalEpisodes : null,
-          typeof show.unwatchedEpisodes === 'number' ? show.unwatchedEpisodes : null,
-          show.sortOrder ?? index,
-          typeof show.manualWeight === 'number' && show.manualWeight > 0 ? show.manualWeight : 1
-        );
-      });
+      syncPlaylistShows(playlistId, shows);
     }
   });
 
@@ -159,6 +281,9 @@ router.put('/:id', requireAuth, async (req, res) => {
   const existing = db.prepare('SELECT id FROM playlists WHERE id = ?').get(playlistId);
   if (!existing) {
     return res.status(404).json({ error: 'Playlist not found' });
+  }
+  if (mode !== undefined && !VALID_MODES.includes(mode)) {
+    return res.status(400).json({ error: `Invalid mode. Must be one of: ${VALID_MODES.join(', ')}` });
   }
 
   const minConsecutive = typeof minConsecutiveEpisodes === 'number' && minConsecutiveEpisodes > 0
@@ -196,27 +321,7 @@ router.put('/:id', requireAuth, async (req, res) => {
     );
 
     if (Array.isArray(shows)) {
-      db.prepare('DELETE FROM playlist_shows WHERE playlist_id = ?').run(playlistId);
-
-      const insertShowStmt = db.prepare(
-        `INSERT INTO playlist_shows (id, playlist_id, plex_show_rating_key, show_title, show_thumb, season_count, total_episodes, unwatched_episodes, sort_order, manual_weight)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-      );
-
-      shows.forEach((show: any, index: number) => {
-        insertShowStmt.run(
-          randomUUID(),
-          playlistId,
-          String(show.ratingKey),
-          show.title,
-          show.thumb || null,
-          typeof show.seasonCount === 'number' ? show.seasonCount : null,
-          typeof show.totalEpisodes === 'number' ? show.totalEpisodes : null,
-          typeof show.unwatchedEpisodes === 'number' ? show.unwatchedEpisodes : null,
-          show.sortOrder ?? index,
-          typeof show.manualWeight === 'number' && show.manualWeight > 0 ? show.manualWeight : 1
-        );
-      });
+      syncPlaylistShows(playlistId, shows);
     }
   });
 

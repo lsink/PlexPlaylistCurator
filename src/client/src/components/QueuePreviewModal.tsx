@@ -1,15 +1,15 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { X, RefreshCw, Layers, Calendar, Clock, Film, AlertCircle } from 'lucide-react';
 import { Playlist, PreviewData } from '../types';
 import { api } from '../api/client';
+import { useModalA11y } from '../hooks/useModalA11y';
+import { getPosterUrl, formatDuration } from '../utils/format';
 
 interface QueuePreviewModalProps {
   isOpen: boolean;
   onClose: () => void;
   playlist: Playlist | null;
   onSync: (id: string) => Promise<void>;
-  plexUrl?: string;
-  plexToken?: string;
 }
 
 export const QueuePreviewModal: React.FC<QueuePreviewModalProps> = ({
@@ -17,13 +17,13 @@ export const QueuePreviewModal: React.FC<QueuePreviewModalProps> = ({
   onClose,
   playlist,
   onSync,
-  plexUrl,
-  plexToken,
 }) => {
+  const dialogRef = useRef<HTMLDivElement>(null);
   const [preview, setPreview] = useState<PreviewData | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [isSyncing, setIsSyncing] = useState(false);
+  const requestIdRef = useRef(0);
 
   useEffect(() => {
     if (isOpen && playlist) {
@@ -32,18 +32,23 @@ export const QueuePreviewModal: React.FC<QueuePreviewModalProps> = ({
       setPreview(null);
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
+    // Invalidate any in-flight request when the modal closes or switches playlist
+    return () => {
+      requestIdRef.current++;
+    };
   }, [isOpen, playlist?.id]);
 
   const loadPreview = async (id: string) => {
+    const requestId = ++requestIdRef.current;
     try {
       setLoading(true);
       setError(null);
       const data = await api.getPreview(id);
-      setPreview(data);
+      if (requestId === requestIdRef.current) setPreview(data);
     } catch (err: any) {
-      setError(err.message || 'Failed to load preview queue');
+      if (requestId === requestIdRef.current) setError(err.message || 'Failed to load preview queue');
     } finally {
-      setLoading(false);
+      if (requestId === requestIdRef.current) setLoading(false);
     }
   };
 
@@ -58,21 +63,20 @@ export const QueuePreviewModal: React.FC<QueuePreviewModalProps> = ({
     }
   };
 
-  const formatDuration = (ms?: number) => {
-    if (!ms) return '';
-    const minutes = Math.round(ms / 60000);
-    return `${minutes} min`;
-  };
 
-  const getPosterUrl = (thumb?: string | null) => {
-    if (!thumb) return null;
-    return `/api/plex/image?path=${encodeURIComponent(thumb)}`;
-  };
+
+  useModalA11y(dialogRef, isOpen, onClose);
 
   if (!isOpen || !playlist) return null;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-6 bg-black/80 backdrop-blur-sm animate-fade-in">
+    <div
+      ref={dialogRef}
+      role="dialog"
+      aria-modal="true"
+      aria-label="Queue preview"
+      className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-6 bg-black/80 backdrop-blur-sm animate-fade-in"
+    >
       <div className="bg-[#1b1e22] border border-[#2e343b] rounded-2xl w-full max-w-4xl max-h-[88vh] flex flex-col shadow-2xl overflow-hidden">
         {/* Header */}
         <div className="px-6 py-4 border-b border-[#2e343b] flex items-center justify-between">

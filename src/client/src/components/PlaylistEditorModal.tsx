@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   X,
   Plus,
@@ -18,6 +18,9 @@ import {
 import { Playlist, ShowItem, InterleaveMode } from '../types';
 import { ShowPickerModal } from './ShowPickerModal';
 import { api } from '../api/client';
+import { useModalA11y } from '../hooks/useModalA11y';
+import { getPosterUrl } from '../utils/format';
+import { useConfirm } from './ConfirmDialog';
 
 interface PlaylistEditorModalProps {
   isOpen: boolean;
@@ -25,8 +28,6 @@ interface PlaylistEditorModalProps {
   playlist: Playlist | null;
   onSave: (data: any, shouldSyncNow?: boolean) => Promise<void>;
   onPreview: (playlist: Playlist) => void;
-  plexUrl?: string;
-  plexToken?: string;
 }
 
 export const PlaylistEditorModal: React.FC<PlaylistEditorModalProps> = ({
@@ -35,9 +36,8 @@ export const PlaylistEditorModal: React.FC<PlaylistEditorModalProps> = ({
   playlist,
   onSave,
   onPreview,
-  plexUrl,
-  plexToken,
 }) => {
+  const dialogRef = useRef<HTMLDivElement>(null);
   const [name, setName] = useState('');
   const [plexPlaylistTitle, setPlexPlaylistTitle] = useState('');
   const [mode, setMode] = useState<InterleaveMode>('auto_proportional');
@@ -52,8 +52,10 @@ export const PlaylistEditorModal: React.FC<PlaylistEditorModalProps> = ({
   const [unscrobbledSuccessKey, setUnscrobbledSuccessKey] = useState<string | null>(null);
   const [isSaving, setIsSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const confirm = useConfirm();
 
   useEffect(() => {
+    let cancelled = false;
     if (isOpen) {
       if (playlist) {
         setName(playlist.name);
@@ -74,7 +76,7 @@ export const PlaylistEditorModal: React.FC<PlaylistEditorModalProps> = ({
         );
         if (hasMissingStats && playlist.id) {
           api.refreshPlaylistStats(playlist.id).then((res) => {
-            if (res.shows && res.shows.length > 0) {
+            if (!cancelled && res.shows && res.shows.length > 0) {
               setShows(res.shows);
             }
           }).catch(() => {});
@@ -92,6 +94,9 @@ export const PlaylistEditorModal: React.FC<PlaylistEditorModalProps> = ({
       }
       setError(null);
     }
+    return () => {
+      cancelled = true;
+    };
   }, [isOpen, playlist]);
 
   const handleNameChange = (val: string) => {
@@ -133,9 +138,12 @@ export const PlaylistEditorModal: React.FC<PlaylistEditorModalProps> = ({
   };
 
   const handleMarkUnwatched = async (showRatingKey: string) => {
-    if (!confirm('Mark all episodes of this TV show as unwatched in Plex?')) {
-      return;
-    }
+    const choice = await confirm({
+      title: 'Mark show as unwatched?',
+      message: 'All episodes of this TV show will be marked as unwatched in Plex.',
+      confirmLabel: 'Mark unwatched',
+    });
+    if (choice !== 'confirm') return;
 
     try {
       setUnscrobblingKey(showRatingKey);
@@ -150,7 +158,7 @@ export const PlaylistEditorModal: React.FC<PlaylistEditorModalProps> = ({
       );
       setTimeout(() => setUnscrobbledSuccessKey(null), 3000);
     } catch (err: any) {
-      alert(`Failed to unscrobble show: ${err.message}`);
+      setError(`Failed to mark show as unwatched: ${err.message}`);
     } finally {
       setUnscrobblingKey(null);
     }
@@ -200,16 +208,20 @@ export const PlaylistEditorModal: React.FC<PlaylistEditorModalProps> = ({
     }
   };
 
-  const getPosterUrl = (thumb?: string | null) => {
-    if (!thumb) return null;
-    return `/api/plex/image?path=${encodeURIComponent(thumb)}`;
-  };
+
+  useModalA11y(dialogRef, isOpen, onClose);
 
   if (!isOpen) return null;
 
   return (
     <>
-      <div className="fixed inset-0 z-40 flex items-center justify-center p-3 sm:p-6 bg-black/80 backdrop-blur-sm animate-fade-in">
+      <div
+      ref={dialogRef}
+      role="dialog"
+      aria-modal="true"
+      aria-label="Playlist editor"
+      className="fixed inset-0 z-40 flex items-center justify-center p-3 sm:p-6 bg-black/80 backdrop-blur-sm animate-fade-in"
+    >
         <div className="bg-[#1b1e22] border border-[#2e343b] rounded-2xl w-full max-w-3xl max-h-[90vh] flex flex-col shadow-2xl overflow-hidden">
           {/* Header */}
           <div className="px-6 py-4 border-b border-[#2e343b] flex items-center justify-between">
@@ -266,10 +278,19 @@ export const PlaylistEditorModal: React.FC<PlaylistEditorModalProps> = ({
               <label className="block text-xs font-semibold uppercase tracking-wider text-gray-400 mb-2">
                 Interleaving & Pacing Strategy
               </label>
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div role="radiogroup" aria-label="Interleaving and pacing strategy" className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 {/* Auto-Proportional */}
                 <div
+                  role="radio"
+                  aria-checked={mode === 'auto_proportional'}
+                  tabIndex={0}
                   onClick={() => setMode('auto_proportional')}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' || e.key === ' ') {
+                      e.preventDefault();
+                      setMode('auto_proportional');
+                    }
+                  }}
                   className={`p-3.5 rounded-xl border transition-all cursor-pointer ${
                     mode === 'auto_proportional'
                       ? 'border-amber-500 bg-amber-500/10 ring-1 ring-amber-500/40'
@@ -287,7 +308,16 @@ export const PlaylistEditorModal: React.FC<PlaylistEditorModalProps> = ({
 
                 {/* Pure Round Robin */}
                 <div
+                  role="radio"
+                  aria-checked={mode === 'round_robin'}
+                  tabIndex={0}
                   onClick={() => setMode('round_robin')}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' || e.key === ' ') {
+                      e.preventDefault();
+                      setMode('round_robin');
+                    }
+                  }}
                   className={`p-3.5 rounded-xl border transition-all cursor-pointer ${
                     mode === 'round_robin'
                       ? 'border-amber-500 bg-amber-500/10 ring-1 ring-amber-500/40'
@@ -305,7 +335,16 @@ export const PlaylistEditorModal: React.FC<PlaylistEditorModalProps> = ({
 
                 {/* Manual Weighted */}
                 <div
+                  role="radio"
+                  aria-checked={mode === 'manual_weighted'}
+                  tabIndex={0}
                   onClick={() => setMode('manual_weighted')}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' || e.key === ' ') {
+                      e.preventDefault();
+                      setMode('manual_weighted');
+                    }
+                  }}
                   className={`p-3.5 rounded-xl border transition-all cursor-pointer ${
                     mode === 'manual_weighted'
                       ? 'border-amber-500 bg-amber-500/10 ring-1 ring-amber-500/40'
@@ -323,7 +362,16 @@ export const PlaylistEditorModal: React.FC<PlaylistEditorModalProps> = ({
 
                 {/* Chronological Air Date */}
                 <div
+                  role="radio"
+                  aria-checked={mode === 'chronological'}
+                  tabIndex={0}
                   onClick={() => setMode('chronological')}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' || e.key === ' ') {
+                      e.preventDefault();
+                      setMode('chronological');
+                    }
+                  }}
                   className={`p-3.5 rounded-xl border transition-all cursor-pointer ${
                     mode === 'chronological'
                       ? 'border-amber-500 bg-amber-500/10 ring-1 ring-amber-500/40'
@@ -341,7 +389,16 @@ export const PlaylistEditorModal: React.FC<PlaylistEditorModalProps> = ({
 
                 {/* Runtime-Balanced (Watch Time) */}
                 <div
+                  role="radio"
+                  aria-checked={mode === 'runtime_balanced'}
+                  tabIndex={0}
                   onClick={() => setMode('runtime_balanced')}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' || e.key === ' ') {
+                      e.preventDefault();
+                      setMode('runtime_balanced');
+                    }
+                  }}
                   className={`p-3.5 rounded-xl border transition-all cursor-pointer sm:col-span-2 ${
                     mode === 'runtime_balanced'
                       ? 'border-cyan-500 bg-cyan-500/10 ring-1 ring-cyan-500/40'
@@ -654,8 +711,6 @@ export const PlaylistEditorModal: React.FC<PlaylistEditorModalProps> = ({
         onClose={() => setShowPickerOpen(false)}
         alreadySelectedKeys={shows.map((s) => s.ratingKey)}
         onAddShows={handleAddShows}
-        plexUrl={plexUrl}
-        plexToken={plexToken}
       />
     </>
   );

@@ -4,6 +4,7 @@ import { SyncService } from './syncService.js';
 let currentTimer: ReturnType<typeof setInterval> | null = null;
 
 export function initSyncScheduler() {
+  SyncService.pruneLogs();
   const settings = db.prepare('SELECT auto_sync_interval_minutes FROM settings WHERE id = 1').get() as any;
   const interval = settings?.auto_sync_interval_minutes ?? 30;
   scheduleSync(interval);

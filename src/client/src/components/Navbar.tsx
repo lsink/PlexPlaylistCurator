@@ -9,6 +9,8 @@ interface NavbarProps {
   onNewPlaylist: () => void;
   onLogout: () => void;
   hasPassword?: boolean;
+  /** null = not checked yet */
+  plexConnected?: boolean | null;
 }
 
 export const Navbar: React.FC<NavbarProps> = ({
@@ -18,6 +20,7 @@ export const Navbar: React.FC<NavbarProps> = ({
   onNewPlaylist,
   onLogout,
   hasPassword,
+  plexConnected = null,
 }) => {
   return (
     <header className="bg-[#181a1d] border-b border-[#2d3238] sticky top-0 z-30 shadow-md">
@@ -33,9 +36,6 @@ export const Navbar: React.FC<NavbarProps> = ({
               <span className="text-[10px] font-mono bg-amber-500/20 text-amber-400 font-semibold px-2 py-0.5 rounded border border-amber-500/30">
                 v{settings?.appVersion || '1.0.0'}
               </span>
-              <span className="hidden sm:inline-block text-[10px] uppercase tracking-wider bg-gray-800 text-gray-300 font-semibold px-2 py-0.5 rounded border border-gray-700">
-                Proxmox LXC
-              </span>
             </h1>
             <p className="text-xs text-gray-400">Automated Interleaved TV Show Rotation</p>
           </div>
@@ -45,9 +45,17 @@ export const Navbar: React.FC<NavbarProps> = ({
         <div className="flex items-center space-x-2 sm:space-x-3">
           {settings?.isConfigured ? (
             <div className="hidden md:flex items-center space-x-2 bg-[#22262b] border border-[#343b42] px-3 py-1.5 rounded-lg text-xs text-gray-300">
-              <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
+              <span
+                role="status"
+                aria-label={plexConnected === false ? 'Plex server unreachable' : plexConnected ? 'Plex server connected' : 'Checking Plex server'}
+                title={plexConnected === false ? 'Plex server unreachable' : plexConnected ? 'Plex server connected' : 'Checking connection...'}
+                className={`w-2 h-2 rounded-full ${
+                  plexConnected === false ? 'bg-red-500' : plexConnected ? 'bg-emerald-400 animate-pulse' : 'bg-gray-500'
+                }`}
+              ></span>
               <span className="text-gray-400">Server:</span>
               <span className="font-medium text-white">{settings.plexServerName || 'Connected'}</span>
+              {plexConnected === false && <span className="text-red-400 font-medium">(unreachable)</span>}
             </div>
           ) : (
             <div className="hidden md:flex items-center space-x-2 bg-amber-500/10 border border-amber-500/30 px-3 py-1.5 rounded-lg text-xs text-amber-400">
@@ -67,6 +75,7 @@ export const Navbar: React.FC<NavbarProps> = ({
           <button
             onClick={onOpenLogs}
             title="Sync History & Logs"
+            aria-label="Sync history and logs"
             className="p-2 rounded-lg bg-[#22262b] hover:bg-[#2d3238] border border-[#343b42] text-gray-300 hover:text-white transition-colors cursor-pointer"
           >
             <History className="w-4 h-4" />
@@ -75,6 +84,7 @@ export const Navbar: React.FC<NavbarProps> = ({
           <button
             onClick={onOpenSettings}
             title="Settings & Plex Connection"
+            aria-label="Settings and Plex connection"
             className="p-2 rounded-lg bg-[#22262b] hover:bg-[#2d3238] border border-[#343b42] text-gray-300 hover:text-white transition-colors cursor-pointer"
           >
             <Settings className="w-4 h-4" />
@@ -84,6 +94,7 @@ export const Navbar: React.FC<NavbarProps> = ({
             <button
               onClick={onLogout}
               title="Sign Out"
+              aria-label="Sign out"
               className="p-2 rounded-lg bg-[#22262b] hover:bg-red-500/20 border border-[#343b42] hover:border-red-500/40 text-gray-300 hover:text-red-400 transition-colors cursor-pointer"
             >
               <LogOut className="w-4 h-4" />

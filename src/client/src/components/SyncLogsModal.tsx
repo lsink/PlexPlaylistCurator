@@ -1,7 +1,9 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { X, History, Trash2, CheckCircle2, AlertCircle, RefreshCw, Loader2 } from 'lucide-react';
 import { SyncLog } from '../types';
 import { api } from '../api/client';
+import { useModalA11y } from '../hooks/useModalA11y';
+import { useConfirm } from './ConfirmDialog';
 
 interface SyncLogsModalProps {
   isOpen: boolean;
@@ -12,32 +14,44 @@ export const SyncLogsModal: React.FC<SyncLogsModalProps> = ({
   isOpen,
   onClose,
 }) => {
+  const dialogRef = useRef<HTMLDivElement>(null);
   const [logs, setLogs] = useState<SyncLog[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const confirm = useConfirm();
+  const requestIdRef = useRef(0);
 
   useEffect(() => {
-    if (isOpen) {
-      loadLogs();
-    }
+    if (!isOpen) return;
+    loadLogs();
+    return () => {
+      requestIdRef.current++;
+    };
   }, [isOpen]);
 
   const loadLogs = async () => {
+    const requestId = ++requestIdRef.current;
     try {
       setLoading(true);
       setError(null);
       const data = await api.getLogs();
-      setLogs(data);
+      if (requestId === requestIdRef.current) setLogs(data);
     } catch (err: any) {
       console.error('Failed to load logs:', err);
-      setError(err.message || 'Failed to load sync logs');
+      if (requestId === requestIdRef.current) setError(err.message || 'Failed to load sync logs');
     } finally {
-      setLoading(false);
+      if (requestId === requestIdRef.current) setLoading(false);
     }
   };
 
   const handleClearLogs = async () => {
-    if (!confirm('Clear all sync history logs?')) return;
+    const choice = await confirm({
+      title: 'Clear sync history?',
+      message: 'This permanently removes all sync log entries.',
+      confirmLabel: 'Clear history',
+      destructive: true,
+    });
+    if (choice !== 'confirm') return;
     try {
       await api.clearLogs();
       setLogs([]);
@@ -72,10 +86,18 @@ export const SyncLogsModal: React.FC<SyncLogsModalProps> = ({
     );
   };
 
+  useModalA11y(dialogRef, isOpen, onClose);
+
   if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-6 bg-black/80 backdrop-blur-sm animate-fade-in">
+    <div
+      ref={dialogRef}
+      role="dialog"
+      aria-modal="true"
+      aria-label="Sync history"
+      className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-6 bg-black/80 backdrop-blur-sm animate-fade-in"
+    >
       <div className="bg-[#1b1e22] border border-[#2e343b] rounded-2xl w-full max-w-4xl max-h-[85vh] flex flex-col shadow-2xl overflow-hidden">
         {/* Header */}
         <div className="px-6 py-4 border-b border-[#2e343b] flex items-center justify-between">
